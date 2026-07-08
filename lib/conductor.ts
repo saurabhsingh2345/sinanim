@@ -1,15 +1,16 @@
 import { SoundEngine } from './sounds';
 import { Prepared, bulletRevealTimes, diagramNodeTimes, quizRevealAt } from './renderer';
+import { addRowAt } from './morph';
 import { revealedCount } from './timing';
 
 /**
  * Drives sound from the timeline. `tick(prep, time)` runs every rendered frame
- * (preview and export) and plays: a click on Run; a keystroke sample per typed
- * character — from the SAME per-character schedule as the renderer, and passing
- * the character so enter/space get their own voice; a whoosh when chapter/title
- * cards land; a pop for each bullet/diagram-node reveal; the quiz reveal chime
- * (export only — the interactive overlay owns quiz feedback); and the narration
- * voice clip for whichever scene's speech window contains `time`.
+ * (preview and export) and plays: a click on Run; a soft whoosh + per-line tick
+ * as code morphs (no more keystroke-per-character clatter); quiet keystrokes for
+ * terminal output only; a whoosh when chapter/title cards land; a pop for each
+ * bullet/diagram-node reveal; the quiz reveal chime (export only — the
+ * interactive overlay owns quiz feedback); and the narration voice clip for
+ * whichever scene's speech window contains `time`.
  * `reset()` on every seek so nothing double-fires.
  */
 export class Conductor {
@@ -58,7 +59,7 @@ export class Conductor {
           this.firedClicks.add(i);
           if ((s as any).sound !== false) this.engine.click();
         }
-      } else if (s.type === 'code' || s.type === 'terminal' || s.type === 'diff') {
+      } else if (s.type === 'terminal') {
         const sched = prep.schedule.get(i);
         if (!sched) return;
         const now = revealedCount(sched, time - s.startTime);
@@ -67,6 +68,23 @@ export class Conductor {
           typedChar = prep.typedText.get(i)?.[now - 1];
           if (typedChar === undefined) typedChar = '';
         }
+      } else if (s.type === 'code' || s.type === 'diff') {
+        const plan = prep.morphs.get(i);
+        if (!plan) return;
+        const T = plan.timing;
+        if (!plan.pureAdd) {
+          const at = s.startTime + T.moveStart;
+          this.cue(`morph:${i}`, time >= at && prev < at, () => this.engine.whoosh(0.28));
+        }
+        // one soft tick per landing line (every other line for big blocks)
+        const every = plan.addedRows.length > 12 ? 2 : 1;
+        plan.addedRows.forEach((_, ri) => {
+          if (ri % every) return;
+          const at = s.startTime + addRowAt(T, ri);
+          this.cue(`land:${i}:${ri}`, time >= at && prev < at, () =>
+            this.engine.pop(0.14, 1.18 + (ri % 3) * 0.05),
+          );
+        });
       } else if (s.type === 'chapter' || s.type === 'title') {
         this.cue(`card:${i}`, time >= s.startTime && prev < s.startTime && s.startTime > 0.2, () =>
           this.engine.whoosh(),

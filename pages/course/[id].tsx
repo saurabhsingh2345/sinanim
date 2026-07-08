@@ -18,6 +18,15 @@ export default function CoursePage() {
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [upNext, setUpNext] = useState<{ id: string; title: string; left: number } | null>(null);
+  const [stage, setStage] = useState(0);
+
+  const LESSON_STAGES = ['scripting the lesson…', 'reviewing the code…', 'writing the voiceover…', 'polishing checkpoints…', 'almost there…'];
+  useEffect(() => {
+    if (!generatingId) { setStage(0); return; }
+    const t = setInterval(() => setStage((s) => Math.min(s + 1, LESSON_STAGES.length - 1)), 5500);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generatingId]);
 
   const refresh = useCallback(() => {
     if (!id) return;
@@ -192,8 +201,8 @@ export default function CoursePage() {
                 ) : (
                   <div className="writing">
                     <Loader2 size={22} className="spin" />
-                    <p className="wt">writing this lesson…</p>
-                    <p className="ws">the model is scripting visuals, code and voiceover for “{current?.lesson.title}”</p>
+                    <p className="wt">{LESSON_STAGES[stage]}</p>
+                    <p className="ws">a multi-pass author is scripting visuals, code and voiceover for “{current?.lesson.title}” — about half a minute</p>
                   </div>
                 )}
 

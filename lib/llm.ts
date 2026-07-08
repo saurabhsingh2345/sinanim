@@ -25,14 +25,17 @@ function cfg(p: Provider): ProviderCfg {
       return {
         base: 'https://api.groq.com/openai/v1',
         key: process.env.GROQ_API_KEY,
-        defaultModel: process.env.LLM_MODEL || 'llama-3.3-70b-versatile',
+        // gpt-oss-120b writes far richer lessons than the llama models at the
+        // same (free) price; the models API still lists llama as a fallback.
+        defaultModel: process.env.LLM_MODEL || 'openai/gpt-oss-120b',
         label: 'Groq',
       };
     case 'openai':
       return {
         base: 'https://api.openai.com/v1',
         key: process.env.OPENAI_API_KEY,
-        defaultModel: process.env.LLM_MODEL || 'gpt-4o-mini',
+        // strongest widely-available default for lesson quality; overridable
+        defaultModel: process.env.LLM_MODEL || 'gpt-4o',
         label: 'OpenAI',
       };
     case 'ollama':
@@ -55,10 +58,10 @@ export function resolveProvider(): Provider {
 export const DEFAULT_MODEL = cfg(resolveProvider()).defaultModel;
 
 // ── Prompt ────────────────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `You are a video author for programming tutorials. You write BOTH the
-visuals (an animation timeline) and the voiceover script (narration). The narration is
-synthesized to real speech and the timeline automatically stretches so the voice always fits —
-so write narration generously and do not worry about exact durations.
+const SYSTEM_PROMPT = `You are the author of an animated, narrated, INTERACTIVE coding lesson.
+You write BOTH the visuals (an animation timeline) and the voiceover script (narration). The
+narration is synthesized to real speech sentence by sentence, and the timeline automatically
+stretches so the voice always fits — write narration generously, never worry about durations.
 Convert the user's request into a strict JSON animation timeline. Return JSON ONLY.
 
 TOP-LEVEL SHAPE:
@@ -73,12 +76,31 @@ TOP-LEVEL SHAPE:
 }
 
 NARRATION (the most important part):
-- Almost every scene should have a "narration" string: 1-3 friendly, conversational spoken
-  sentences a human tutor would say over that moment ("Let's start by defining a function...").
+- Almost every scene should have a "narration" string: 2-5 full, friendly, conversational
+  sentences a great human tutor would say over that moment. Keep each individual sentence under
+  ~22 words (they are synthesized one at a time), but NEVER compress the content — more short
+  sentences, not fewer words.
+- HARD REQUIREMENT: on title, bullets, code, diff, quiz and diagram scenes the narration must be
+  at least 2 sentences (aim for 30-70 spoken words). A one-line narration on these scenes is
+  invalid output. Across the whole lesson, aim for 350+ spoken words total — a real 2-3 minute
+  lesson, not a trailer.
+  BAD narration:  "Quick check." / "It's more concise." / "Let's start with an example."
+  GOOD narration: "Before we celebrate, let's make sure this clicked. Think about what the
+  comprehension actually returns. If you're not sure, that's exactly why we're checking now."
 - Narration is plain speech: no code symbols, no markdown, spell things the way you'd SAY them
   ("dot map", "underscore init underscore").
+- Never narrate the obvious ("now I type the code"). Narrate the REASONING: why this line, what
+  would break without it, what the computer actually does.
 - Subtitles are burned in automatically from narration — do NOT duplicate narration as "text" scenes.
 - Use "text" scenes only for short punchy on-screen labels (max ~6 words), position "top-center".
+
+TEACHING DEPTH (what separates a great lesson from a slideshow — all four are REQUIRED):
+1. MOTIVATE FIRST: open with a concrete, real problem the learner recognizes, not a definition.
+2. ONE COMMON MISTAKE: show the wrong (or naive) version first, run or discuss it, then morph it
+   into the fix with a "diff" scene while the narration explains exactly why the first version fails.
+3. ANSWER "WHY NOT JUST...?": anticipate the obvious alternative a learner would ask about and
+   address it head-on in narration (or a quiz).
+4. EXPLAIN THE WHY on every code beat: mechanism and consequences, not a readout of the syntax.
 
 SCENE TYPES (every scene needs "startTime" and "duration" in seconds; all accept "narration"):
 - title:    { "type":"title", "text":"Python f-strings", "subtitle":"a 60-second tutorial", "startTime":0, "duration":3, "narration":"..." }  — full-screen card; open the video with one and close with one.
@@ -87,26 +109,27 @@ SCENE TYPES (every scene needs "startTime" and "duration" in seconds; all accept
 - diagram:  { "type":"diagram", "title":"Request flow", "nodes":[{"id":"a","label":"Client","x":0.2,"y":0.5},{"id":"b","label":"Server","x":0.5,"y":0.5},{"id":"c","label":"DB","x":0.8,"y":0.5}], "edges":[{"from":"a","to":"b","label":"HTTP"},{"from":"b","to":"c"}], "startTime":11, "duration":7, "narration":"..." }  — animated flowchart. Node x/y are fractions (0..1); spread nodes out, 2-6 nodes.
 - quote:    { "type":"quote", "text":"Explicit is better than implicit.", "attribution":"The Zen of Python", "startTime":18, "duration":4, "narration":"..." }  — big centered statement.
 - bigstat:  { "type":"bigstat", "value":"10x", "label":"faster than the naive version", "startTime":22, "duration":3.5, "narration":"..." }  — one huge number that counts up.
-- quiz:     { "type":"quiz", "question":"What does f before a string do?", "options":["Formats it","Freezes it","Makes it faster"], "answerIndex":0, "explanation":"The f prefix enables inline expressions in braces.", "startTime":26, "duration":8, "narration":"Quick check before we move on." }  — interactive checkpoint: the player pauses and waits for the learner's answer. 2-4 options, one clearly correct. Include ONE quiz after each key concept.
-- code:     { "type":"code", "language":"python", "code":"...", "typingSpeed":18, "title":"main.py", "startTime":3, "duration":5, "narration":"..." }
-- diff:     { "type":"diff", "language":"python", "before":"<full old snippet>", "after":"<full new snippet>", "typingSpeed":18, "title":"main.py", "startTime":8, "duration":6, "narration":"..." }  — evolves code on screen: unchanged lines stay, removed lines collapse, new lines are typed. USE THIS whenever you improve/extend code you already showed instead of re-typing the whole file.
+- quiz:     { "type":"quiz", "question":"What does f before a string do?", "options":["Formats it","Freezes it","Makes it faster"], "answerIndex":0, "explanation":"The f prefix enables inline expressions in braces.", "startTime":26, "duration":8, "narration":"Quick check before we move on." }  — interactive checkpoint: the player pauses and waits for the learner's answer. 2-4 options; distractors must be PLAUSIBLE mistakes a real learner makes; the explanation must teach, not just confirm. Include ONE quiz after each key concept.
+- code:     { "type":"code", "language":"python", "code":"...", "title":"main.py", "startTime":3, "duration":5, "narration":"..." }  — the code lands with an animated line cascade (fast and calm, never typed out character by character), then holds while you narrate through it.
+- diff:     { "type":"diff", "language":"python", "before":"<full old snippet>", "after":"<full new snippet>", "title":"main.py", "startTime":8, "duration":6, "narration":"..." }  — MAGIC-MOVE morph: unchanged code slides into place, removed lines fade out, new lines land one by one. This is the signature visual — USE IT for every evolution of code you already showed. Never re-show a whole file as a new "code" scene.
 - terminal: { "type":"terminal", "output":"...", "prompt":"$ ", "typingSpeed":40, "startTime":14, "duration":3, "sound":true, "narration":"..." }
 - text:     { "type":"text", "content":"short label", "position":"top-center", "fadeIn":0.4, "fadeOut":0.4, "startTime":2, "duration":4 }
 - click:    { "type":"click", "button":"Run", "startTime":5.5, "duration":0.5, "sound":true }
 - wait:     { "type":"wait", "startTime":5, "duration":1, "narration":"..." }  — a beat of pure voiceover.
-- highlight:{ "type":"highlight", "startLine":2, "endLine":3, "startTime":6, "duration":2 }  — tints lines of the current code panel while you talk about them.
+- highlight:{ "type":"highlight", "startLine":2, "endLine":3, "startTime":6, "duration":2 }  — dims everything but those lines of the current code panel and the camera dives in. Use while narration walks through specific lines.
+- mascot:   { "type":"mascot", "action":"point", "line":3, "side":"right", "startTime":6, "duration":3, "narration":"..." }  — Bit, the little studio robot, appears beside the current code panel and ACTS. Actions: "wave" (greets — good on the title card), "point" (extends an arm at "line" N of the visible code while you explain it), "think" (puzzled — good right before revealing a gotcha), "celebrate" (jumps with confetti — after a successful run), "shocked" (recoils — when code errors or the naive version fails). Place 2-4 mascot scenes per lesson at MEANINGFUL moments, overlapping the code scene they refer to. Never random.
 - sprite:   { "type":"sprite", "template":"boy", "x":0.5, "y":0.72, "scale":1, "props":{"color":"#22d3ee"}, "animations":[Keyframe], "startTime":0, "duration":4 }
 
 LESSON STRUCTURE (follow unless the request clearly isn't a tutorial):
-1. "title" card introducing the topic (narrated welcome).
-2. "bullets" card previewing what the lesson covers (2-4 items).
-3. "code" scene typing the first working version (narrated explanation).
-4. Optional "highlight" + "wait" while the narration walks through key lines.
-5. "click" Run, then "terminal" showing real output (narrated).
-6. One or more "diff" scenes evolving the code further, each followed by a run/terminal when it helps.
+1. "title" card introducing the topic (narrated welcome; a mascot "wave" is nice here).
+2. "bullets" card: the concrete problem this lesson solves + what you'll build (2-4 items).
+3. "code" scene with the first version (narrated reasoning). Often the NAIVE version — see depth rule 2.
+4. "highlight" + "mascot" point + "wait" while the narration walks through the key lines.
+5. "click" Run, then "terminal" showing real output (narrated). Mascot "celebrate" or "shocked" as fits.
+6. One or more "diff" scenes evolving the code, each narrating WHY, followed by a run/terminal when it helps.
 7. A "quiz" checkpoint after each key concept (at least one per lesson).
 8. Use "chapter" cards to divide longer lessons into sections; use "diagram" when an architecture or flow is easier shown than told.
-9. Closing "bullets" recap or "title" card (narrated outro).
+9. Closing "bullets" recap (what was learned + the why) or "title" outro card.
 
 SPRITE SCENES (for real-world / character animation, NOT code):
 - "template" is one of: boy, ball, cloud, sun, star, ground.
@@ -129,15 +152,62 @@ SPRITE SCENES (for real-world / character animation, NOT code):
 - Use sprite scenes when the request is about people, objects, or physical actions (jumping, bouncing, flying). Use code/terminal scenes only for programming content.
 
 RULES:
-- typingSpeed is CHARACTERS PER SECOND. Use 14-24 for code, 30-50 for terminal.
-- Make code scenes long enough to finish typing: duration >= (code length / typingSpeed) + 1.
-  (Narration may stretch scenes further automatically — that is fine and expected.)
-- Sequence scenes with small gaps. A "click" on Run should come AFTER code finishes and BEFORE terminal output.
-- Target a 30-60 second tutorial (before narration stretching). Cover the topic properly.
-- Use real, correct, runnable code for the requested language. Terminal output must match what the code actually prints.
+- Durations are rough; the engine re-paces everything and stretches scenes to fit the voice.
+- Sequence scenes with small gaps. A "click" on Run should come AFTER a code/diff scene and BEFORE terminal output.
+- Target 60-120 seconds of content (10-18 scenes). Cover the topic PROPERLY — depth beats brevity.
+- Use real, correct, runnable code for the requested language. Terminal output must match what the code actually prints, character for character.
+- Keep snippets ≤ 16 lines so they fit the panel; evolve them with diffs instead of growing one giant file.
 - In "diff" scenes, "before" and "after" are each the COMPLETE snippet, and "before" must exactly equal the code the viewer is currently looking at.
 - "backgroundColor" must be "#0b0b10". fps 30, width 1920, height 1080.
 - Output ONLY the JSON object. No markdown, no commentary.`;
+
+// ── Critic pass ─────────────────────────────────────────────────────────────────
+// A second, cheap LLM round-trip that reviews the draft lesson like a ruthless
+// technical editor. It catches wrong code, broken diff chains, shallow
+// narration, and weak quizzes — the difference between "generated" and "taught".
+const CRITIC_PROMPT = `Now act as a ruthless technical editor. You will receive the animation-timeline
+JSON you are reviewing. Return the FULL improved JSON in the exact same schema — no commentary.
+
+REVIEW CHECKLIST, in priority order:
+1. CODE CORRECTNESS: every snippet must be real, runnable and idiomatic. Fix bugs. Every
+   "terminal" output must be exactly what the preceding code prints.
+2. DIFF INTEGRITY: every "diff".before must EXACTLY equal the code currently on screen (the
+   previous "code".code or "diff".after). Repair the chain if broken.
+3. COMPLETENESS: the lesson must (a) open with a concrete motivation, (b) contain one
+   common-mistake or naive-version diff with narration explaining why it fails, (c) answer one
+   "why not just...?" alternative, (d) contain AT LEAST ONE quiz checkpoint after a key
+   concept, and (e) close with a recap (bullets). ADD any of these that are missing.
+4. NARRATION: every title/bullets/code/diff/quiz/diagram scene needs AT LEAST 2 full sentences
+   (30-70 spoken words) of substance — EXPAND thin narration ("Quick check", "It's more
+   concise", "Let's run it" are failures: rewrite them with the actual reasoning). The whole
+   lesson should total 350+ spoken words. Keep individual sentences under ~22 words, but never
+   cut content to get there. Conversational, reasoning not play-by-play, no raw code symbols,
+   no filler ("as you can see", "simply", "just").
+5. QUIZ: exactly one defensible correct answer, plausible distractors, teaching explanation.
+6. MASCOT: actions must land on meaningful beats (point while explaining, shocked on failure,
+   celebrate on success). Fix "line" numbers that don't match the visible code.
+
+You are an ENRICHING editor: fix, expand and ADD freely, but only remove a scene when it is
+factually wrong or duplicated. The improved lesson must never teach LESS than the draft.
+Keep it to ≤ 20 scenes. Return ONLY the improved JSON object.`;
+
+// A dedicated pass that ONLY rewrites narration. Models reliably under-write
+// voiceover when juggling the whole timeline; given the single job of "speak
+// like a great tutor", they deliver. Everything else in the JSON is untouched.
+const NARRATION_PROMPT = `You will receive an animation-timeline JSON for a narrated coding lesson.
+Rewrite ONLY the "narration" fields — change NOTHING else (no scene edits, no reordering, no
+timing changes, keep every other field byte-identical). Return the FULL JSON.
+
+For every title, bullets, code, diff, quiz and diagram scene, write the voiceover a warm,
+sharp human tutor would actually say over that moment: 2-5 sentences, 30-80 spoken words.
+- Explain the REASONING: why this code, what breaks without it, what the machine really does.
+- On the naive version, foreshadow the problem. On the fix, contrast it with what it replaced.
+- On quizzes, frame the stakes of the question without giving the answer away.
+- On recaps, connect what was learned back to the opening problem.
+- Plain speech only: no code symbols, say things the way you'd SAY them. Each sentence under
+  ~22 words. No filler ("as you can see", "simply", "just", "basically").
+Short scenes (click, wait, terminal, mascot, text, highlight) may keep one good sentence.
+Return ONLY the JSON object.`;
 
 export interface GenerateOptions {
   model?: string;
@@ -162,16 +232,101 @@ export async function chatJSON(
   return content;
 }
 
+/** Critic pass runs on hosted providers; local Ollama stays single-pass (speed).
+ *  Set LLM_DEEP=0 to skip everywhere, LLM_DEEP=1 to force it on. */
+function criticEnabled(): boolean {
+  if (process.env.LLM_DEEP === '0') return false;
+  if (process.env.LLM_DEEP === '1') return true;
+  return resolveProvider() !== 'ollama';
+}
+
+/** Parse a model response into a DSL, retrying the call if the JSON is
+ *  malformed or truncated (reasoning models occasionally cut off). */
+async function draftDSL(prompt: string, opts: GenerateOptions): Promise<AnimationDSL> {
+  let lastErr: unknown;
+  for (let tries = 0; tries < 3; tries++) {
+    try {
+      const content = await chatJSON(
+        SYSTEM_PROMPT,
+        `Create an animation timeline for: ${prompt}`,
+        opts,
+      );
+      return normalizeDSL(JSON.parse(extractJSON(content)));
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
+}
+
 export async function generateDSL(
   prompt: string,
   opts: GenerateOptions = {},
 ): Promise<AnimationDSL> {
-  const content = await chatJSON(
-    SYSTEM_PROMPT,
-    `Create an animation timeline for: ${prompt}`,
-    opts,
-  );
-  return repace(normalizeDSL(JSON.parse(extractJSON(content))));
+  let dsl = await draftDSL(prompt, opts);
+
+  if (criticEnabled()) {
+    try {
+      const improved = await chatJSON(
+        SYSTEM_PROMPT,
+        `${CRITIC_PROMPT}\n\nThe lesson request was: ${prompt}\n\nJSON to review:\n${JSON.stringify(dsl)}`,
+        opts,
+      );
+      dsl = normalizeDSL(JSON.parse(extractJSON(improved)));
+    } catch {
+      // the draft is already valid — never let the editor pass break generation
+    }
+
+    // structural guarantees the prompts alone can't be trusted with: every
+    // lesson ships with a quiz checkpoint and a recap. Repair only if missing.
+    const missing: string[] = [];
+    if (!dsl.scenes.some((s) => s.type === 'quiz')) {
+      missing.push(
+        'exactly ONE "quiz" scene placed right after the most important concept (plausible distractors, teaching explanation, 2+ sentence narration framing the stakes)',
+      );
+    }
+    const lastCard = [...dsl.scenes].reverse().find((s) => s.type === 'bullets' || s.type === 'title');
+    if (!dsl.scenes.some((s) => s.type === 'bullets' && s.startTime > dsl.duration * 0.6) && lastCard?.type !== 'bullets') {
+      missing.push(
+        'a closing "bullets" recap scene connecting what was learned back to the opening problem',
+      );
+    }
+    if (missing.length) {
+      try {
+        const repaired = await chatJSON(
+          SYSTEM_PROMPT,
+          `This timeline JSON is missing required scenes. Insert ${missing.join(' and ')}. ` +
+            `Change nothing else and return the FULL JSON.\n\nJSON:\n${JSON.stringify(dsl)}`,
+          opts,
+        );
+        const fixed = normalizeDSL(JSON.parse(extractJSON(repaired)));
+        if (fixed.scenes.length >= dsl.scenes.length) dsl = fixed;
+      } catch {
+        // ship without — the lesson still plays
+      }
+    }
+    try {
+      const voiced = await chatJSON(
+        SYSTEM_PROMPT,
+        `${NARRATION_PROMPT}\n\nJSON:\n${JSON.stringify(dsl)}`,
+        opts,
+      );
+      const rich = normalizeDSL(JSON.parse(extractJSON(voiced)));
+      // accept only if the pass did its one job: same scenes, more speech
+      const wordsOf = (d: AnimationDSL) =>
+        d.scenes.reduce((a, s) => a + (s.narration || '').split(/\s+/).filter(Boolean).length, 0);
+      if (
+        rich.scenes.length === dsl.scenes.length &&
+        rich.scenes.every((s, i) => s.type === dsl.scenes[i].type) &&
+        wordsOf(rich) > wordsOf(dsl)
+      ) {
+        dsl = rich;
+      }
+    } catch {
+      // narration stays as-is
+    }
+  }
+  return repace(dsl);
 }
 
 // ── OpenAI-compatible (Groq / OpenAI) ───────────────────────────────────────────
@@ -187,29 +342,75 @@ async function callOpenAICompatible(
       `${c.label} API key is missing. Add it to .env.local (get a free Groq key at https://console.groq.com/keys).`,
     );
   }
-  const res = await fetch(`${c.base}/chat/completions`, {
-    method: 'POST',
-    signal,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${c.key}`,
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.4,
-      response_format: { type: 'json_object' },
+
+  // Model-capability quirks we adapt to on the fly (newer OpenAI reasoning
+  // models reject max_tokens and non-default temperature; some reject JSON mode).
+  // `budget` is the completion size; it shrinks if a tier rejects the request as
+  // too large (free Groq caps prompt+completion at 8000 tokens/minute).
+  // `model` can change if the client sent an id from a different provider.
+  const caps = { jsonMode: true, maxTokens: true, temperature: true, budget: 8000, model };
+
+  const attempt = async (): Promise<{ ok: true; content: string } | { ok: false; status: number; body: string }> => {
+    const body: Record<string, any> = {
+      model: caps.model,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`${c.label} request failed (${res.status}). ${body}`);
+    };
+    if (caps.temperature) body.temperature = 0.4;
+    // room for a full lesson; the param name differs on reasoning models
+    if (caps.maxTokens) body.max_tokens = caps.budget;
+    else body.max_completion_tokens = caps.budget;
+    if (caps.jsonMode) body.response_format = { type: 'json_object' };
+
+    const res = await fetch(`${c.base}/chat/completions`, {
+      method: 'POST',
+      signal,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${c.key}` },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      return { ok: false, status: res.status, body: txt };
+    }
+    const data = await res.json();
+    return { ok: true, content: data?.choices?.[0]?.message?.content ?? '' };
+  };
+
+  let r = await attempt();
+  // adapt to a rejected parameter / oversized / unknown-model request and retry
+  // (OpenAI answers 400 for bad params, 413 for oversize, 404 for a bad model)
+  for (let fix = 0; !r.ok && (r.status === 400 || r.status === 413 || r.status === 404) && fix < 5; fix++) {
+    const b = r.body.toLowerCase();
+    if (b.includes('json_validate_failed') || (b.includes('response_format') && caps.jsonMode)) {
+      caps.jsonMode = false; // extractJSON copes with free-form output
+    } else if (b.includes('max_tokens') && caps.maxTokens) {
+      caps.maxTokens = false; // → max_completion_tokens
+    } else if (b.includes('temperature') && caps.temperature) {
+      caps.temperature = false; // reasoning models allow only the default
+    } else if (r.status === 413 || b.includes('request too large') || b.includes('reduce')) {
+      // shrink the completion budget to fit a small per-minute token cap
+      const limit = b.match(/limit (\d+)/)?.[1];
+      const promptEst = Math.ceil((system.length + user.length) / 3.5);
+      caps.budget = Math.max(1200, (limit ? parseInt(limit) : caps.budget) - promptEst - 300);
+    } else if ((b.includes('invalid model') || b.includes('model_not_found') || b.includes('does not exist')) && caps.model !== c.defaultModel) {
+      // the caller passed a model from another provider (stale UI selection) —
+      // fall back to this provider's known-good default instead of failing
+      caps.model = c.defaultModel;
+    } else break;
+    r = await attempt();
   }
-  const data = await res.json();
-  return data?.choices?.[0]?.message?.content ?? '';
+  // rate limits / transient upstream errors: back off and retry, honoring the
+  // provider's own "try again in Xs" hint (free Groq tier is TPM-limited).
+  for (let tries = 0; !r.ok && (r.status === 429 || r.status >= 500) && tries < 4; tries++) {
+    const hint = r.body.match(/try again in ([\d.]+)s/i);
+    const waitMs = hint ? Math.ceil(parseFloat(hint[1]) * 1000) + 400 : 1500 * (tries + 1);
+    await new Promise((res2) => setTimeout(res2, Math.min(waitMs, 12000)));
+    r = await attempt();
+  }
+  if (!r.ok) throw new Error(`${c.label} request failed (${r.status}). ${r.body}`);
+  return r.content;
 }
 
 // ── Ollama (local, native API) ───────────────────────────────────────────────────
@@ -319,7 +520,9 @@ const PREFERRED: Record<string, string[]> = {
     'qwen/qwen3-32b',
     'moonshotai/kimi-k2-instruct',
   ],
-  openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'],
+  // gpt-4o first: fast enough for a snappy multi-pass author and excellent
+  // quality. Stronger (slower) reasoning models follow for when you want them.
+  openai: ['gpt-4o', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o-mini'],
 };
 
 async function listOpenAICompatibleModels(c: ProviderCfg): Promise<string[]> {
@@ -329,8 +532,16 @@ async function listOpenAICompatibleModels(c: ProviderCfg): Promise<string[]> {
     });
     if (!res.ok) return [];
     const data = await res.json();
-    const ids: string[] = (data?.data ?? []).map((m: any) => m.id).filter(Boolean);
+    let ids: string[] = (data?.data ?? []).map((m: any) => m.id).filter(Boolean);
     const provider = c.base.includes('groq') ? 'groq' : 'openai';
+    if (provider === 'openai') {
+      // keep only chat models — the account also lists embeddings, TTS, image,
+      // and legacy completion models that can't author a lesson
+      ids = ids.filter(
+        (m) => /^(gpt-4|gpt-5|o1|o3|o4|chatgpt)/.test(m) &&
+          !/(audio|realtime|transcribe|tts|image|search|moderation)/.test(m),
+      );
+    }
     const preferred = (PREFERRED[provider] || []).filter((m) => ids.includes(m));
     const rest = ids.filter((m) => !preferred.includes(m)).sort();
     return [...preferred, ...rest];

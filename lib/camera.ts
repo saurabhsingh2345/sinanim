@@ -29,10 +29,12 @@ export function cameraAt(
   H: number,
   targets: FocusTarget[],
 ): CameraState {
-  // idle breathing: barely-there drift that keeps long holds alive
-  let zoom = 1 + 0.006 * Math.sin(time * 0.32);
-  let fx = W / 2 + Math.sin(time * 0.21) * W * 0.003;
-  let fy = H / 2 + Math.cos(time * 0.17) * H * 0.003;
+  // Static base: perfectly centered, zoom exactly 1 → identity transform, so
+  // resting text is pixel-perfect (no shimmer). Motion comes ONLY from real
+  // focus targets (card push-ins, highlight dives), never idle drift.
+  let zoom = 1;
+  let fx = W / 2;
+  let fy = H / 2;
 
   for (const t of targets) {
     const s = clamp(t.strength, 0, 1);
@@ -40,6 +42,11 @@ export function cameraAt(
     zoom = lerp(zoom, t.zoom, s);
     fx = lerp(fx, t.x, s);
     fy = lerp(fy, t.y, s);
+  }
+
+  // when essentially at rest, snap fully to identity so glyphs land on the pixel grid
+  if (Math.abs(zoom - 1) < 0.004 && Math.abs(fx - W / 2) < 1 && Math.abs(fy - H / 2) < 1) {
+    return { zoom: 1, fx: W / 2, fy: H / 2 };
   }
 
   // keep the frame covered: clamp focus so zoom never reveals the void

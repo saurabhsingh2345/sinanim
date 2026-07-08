@@ -56,6 +56,14 @@ const dsl = normalizeDSL({
       duration: 5,
       narration: 'Let us define a function that greets whoever we pass in.',
     },
+    {
+      type: 'mascot',
+      action: 'point',
+      line: 2,
+      side: 'right',
+      startTime: 4,
+      duration: 3,
+    },
     { type: 'click', button: 'Run', startTime: 7.7, duration: 0.5 },
     {
       type: 'terminal',
@@ -115,15 +123,18 @@ const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
 const byType = (type: string) => paced.scenes.find((s) => s.type === type)!;
 const diffScene = byType('diff');
 const quizScene = byType('quiz');
+const codeScene = byType('code');
 const shots: [string, number][] = [
   ['title', 1.0],
   ['bullets', byType('bullets').startTime + 3.2],
   ['chapter', byType('chapter').startTime + 1.2],
-  ['code-typing', byType('code').startTime + 2.0],
+  ['code-cascade', codeScene.startTime + 0.8],
+  ['code-mascot', codeScene.startTime + codeScene.duration - 0.4],
   ['terminal', byType('terminal').startTime + 1.2],
-  ['diff-hold', diffScene.startTime + 0.6],
-  ['diff-collapse', diffScene.startTime + 1.4],
-  ['diff-typing', diffScene.startTime + 3.5],
+  ['morph-hold', diffScene.startTime + 0.4],
+  ['morph-move', diffScene.startTime + 1.0],
+  ['morph-land', diffScene.startTime + 1.9],
+  ['morph-done', diffScene.startTime + 3.6],
   ['diagram', byType('diagram').startTime + 2.6],
   ['quiz-options', quizScene.startTime + 2.0],
   ['quiz-reveal', quizScene.startTime + quizScene.duration - 0.8],

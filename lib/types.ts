@@ -172,6 +172,17 @@ export interface ChapterScene extends BaseScene {
   text: string;
 }
 
+/** The studio mascot appears and acts — an overlay on the current moment.
+ *  With `line` set it points at that line of the visible code panel. */
+export interface MascotScene extends BaseScene {
+  type: 'mascot';
+  action: 'wave' | 'point' | 'think' | 'celebrate' | 'shocked' | 'idle';
+  /** 1-based line of the current code panel to aim at (point/look). */
+  line?: number;
+  /** Which side of the code panel to stand on (default right). */
+  side?: 'left' | 'right';
+}
+
 /** Interactive checkpoint. The player pauses here and waits for an answer;
  *  in exported video it becomes a timed question → answer reveal. */
 export interface QuizScene extends BaseScene {
@@ -197,6 +208,7 @@ export type Scene =
   | QuoteScene
   | BigStatScene
   | ChapterScene
+  | MascotScene
   | QuizScene;
 
 export interface AnimationDSL {

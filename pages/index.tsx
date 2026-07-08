@@ -39,6 +39,7 @@ export default function Home() {
   const [prompt, setPrompt] = useState('');
   const [dsl, setDsl] = useState<AnimationDSL | null>(null);
   const [loading, setLoading] = useState(false);
+  const [stage, setStage] = useState(0);
   const [error, setError] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState('');
@@ -72,6 +73,18 @@ export default function Home() {
     setCompletion(comp);
   }, []);
   useEffect(() => { refreshShelf(); }, [refreshShelf]);
+
+  // authoring is a multi-pass pipeline (~20-30s); rotate the label so the wait
+  // clearly progresses instead of looking frozen
+  const LESSON_STAGES = ['scripting the lesson…', 'reviewing the code…', 'writing the voiceover…', 'polishing checkpoints…', 'almost there…'];
+  const COURSE_STAGES = ['planning the modules…', 'sequencing lessons…', 'writing objectives…', 'almost there…'];
+  useEffect(() => {
+    if (!loading) { setStage(0); return; }
+    const steps = mode === 'course' ? COURSE_STAGES : LESSON_STAGES;
+    const t = setInterval(() => setStage((s) => Math.min(s + 1, steps.length - 1)), 5500);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, mode]);
 
   const generate = async () => {
     if (!prompt.trim() || loading) return;
@@ -190,7 +203,7 @@ export default function Home() {
             <button className="generate" onClick={generate} disabled={loading || !prompt.trim()}>
               {loading ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}
               {loading
-                ? mode === 'course' ? 'designing curriculum…' : 'writing the lesson…'
+                ? (mode === 'course' ? COURSE_STAGES : LESSON_STAGES)[stage]
                 : mode === 'course' ? 'Build course' : 'Make lesson'}
               <kbd>⌘⏎</kbd>
             </button>

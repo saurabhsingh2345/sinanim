@@ -7,6 +7,7 @@ import {
   DiagramScene,
   DiffScene,
   Easing,
+  MascotScene,
   QuizScene,
   QuoteScene,
   SpriteScene,
@@ -18,35 +19,20 @@ import { tokenizeCode } from './highlight';
 import { TEMPLATES, SpriteState } from './templates';
 import { clamp, easeInOut, easeInCubic, easeOutCubic, easeOutBack, lerp, parseHex } from './utils';
 import { typeSchedule, revealedCount } from './timing';
-import { DIFF_COLLAPSE, DiffKind, addedText, diffHold, diffLines, diffTypeStart } from './diff';
 import { FocusTarget, applyCamera, cameraAt } from './camera';
 import { easeOutExpo, envelope, springOut, staggerProgress } from './motion';
+import { MorphPlan, addRowAt, buildMorph } from './morph';
+import { MascotAction, drawMascot } from './mascot';
 
 // ── Prepared timeline ─────────────────────────────────────────────────────────
-export interface CharCell {
-  ch: string;
-  color: string;
-}
-
-export interface PreparedDiffLine {
-  kind: DiffKind;
-  cells: CharCell[];
-  /** For added lines: reveal time (s, scene-relative) of the line's first char. */
-  firstCharAt?: number;
-  /** For added lines: index of the line's first char in the typing schedule. */
-  charOffset?: number;
-}
-
 export interface Prepared {
   dsl: AnimationDSL;
-  /** sceneIndex -> lines of individually-colored characters (no newlines) */
-  code: Map<number, CharCell[][]>;
-  /** sceneIndex -> per-character reveal times (human typing w/ per-line pauses) */
+  /** code/diff sceneIndex -> morph plan (a `code` scene morphs from empty). */
+  morphs: Map<number, MorphPlan>;
+  /** terminal sceneIndex -> per-character reveal times (human typing rhythm). */
   schedule: Map<number, number[]>;
-  /** sceneIndex -> the raw text behind that schedule (conductor picks key sounds per char) */
+  /** terminal sceneIndex -> the raw text behind that schedule. */
   typedText: Map<number, string>;
-  /** sceneIndex -> prepared diff lines (schedule for added chars in `schedule`) */
-  diffs: Map<number, PreparedDiffLine[]>;
 }
 
 /** Live UI state the interactive player feeds in (never set during export). */
@@ -57,57 +43,33 @@ export interface RenderUI {
     /** Set once answered: whether `selected` was right. */
     correct: boolean | null;
   };
-}
-
-function toCells(line: { text: string; color: string }[]): CharCell[] {
-  return line.flatMap((t) => t.text.split('').map((ch) => ({ ch, color: t.color })));
+  /** Wall-clock seconds since the current interaction began — drives overlay
+   *  animation (the mascot) while the timeline itself is paused. */
+  uiTime?: number;
 }
 
 export async function prepare(dsl: AnimationDSL): Promise<Prepared> {
-  const code = new Map<number, CharCell[][]>();
+  const morphs = new Map<number, MorphPlan>();
   const schedule = new Map<number, number[]>();
   const typedText = new Map<number, string>();
-  const diffs = new Map<number, PreparedDiffLine[]>();
   await Promise.all(
     dsl.scenes.map(async (s, i) => {
       if (s.type === 'code') {
         const toks = await tokenizeCode(s.code, s.language);
-        code.set(i, toks.map(toCells));
-        schedule.set(i, typeSchedule(s.code, s.typingSpeed));
-        typedText.set(i, s.code);
+        morphs.set(i, buildMorph('', s.code, [], toks));
       } else if (s.type === 'terminal') {
         schedule.set(i, typeSchedule(s.output, s.typingSpeed));
         typedText.set(i, s.output);
       } else if (s.type === 'diff') {
-        const lines = diffLines(s.before, s.after);
         const [beforeToks, afterToks] = await Promise.all([
           tokenizeCode(s.before, s.language),
           tokenizeCode(s.after, s.language),
         ]);
-        const typeStart = diffTypeStart(lines);
-        const added = addedText(lines);
-        const sched = typeSchedule(added, s.typingSpeed).map((t) => t + typeStart);
-        let bi = 0, ai = 0, pos = 0;
-        const prepped: PreparedDiffLine[] = lines.map((l) => {
-          if (l.kind === 'removed') return { kind: l.kind, cells: toCells(beforeToks[bi++] || []) };
-          const cells = toCells(afterToks[ai++] || []);
-          if (l.kind === 'kept') { bi++; return { kind: l.kind, cells }; }
-          const line: PreparedDiffLine = {
-            kind: l.kind,
-            cells,
-            charOffset: pos,
-            firstCharAt: sched[pos] ?? typeStart,
-          };
-          pos += l.text.length + 1; // +1 for the newline in addedText
-          return line;
-        });
-        diffs.set(i, prepped);
-        schedule.set(i, sched);
-        typedText.set(i, added);
+        morphs.set(i, buildMorph(s.before, s.after, beforeToks, afterToks));
       }
     }),
   );
-  return { dsl, code, schedule, typedText, diffs };
+  return { dsl, morphs, schedule, typedText };
 }
 
 // ── Palette / constants ─────────────────────────────────────────────────────────
@@ -131,9 +93,7 @@ const C = {
   trafficGreen: '#28c840',
 };
 const MONO = "'JetBrains Mono', 'Menlo', 'Consolas', monospace";
-const CHAR_FADE = 0.16; // per-character fade-in (s)
-const CHAR_RISE = 3; // px a character settles down as it lands
-const CARET_GLIDE = 0.055; // s the caret takes to slide onto the next cell
+const CHAR_FADE = 0.16; // per-character fade-in (s, terminal output)
 const WIN_ANIM = 0.5; // window entrance (s)
 const TITLE_H = 52;
 const PAD = 36;
@@ -220,17 +180,14 @@ function layoutPanels(prep: Prepared, time: number): PanelSlot[] {
         : null;
 
   const panels: { kind: 'code' | 'terminal' | 'diff'; idx: number; h: number }[] = [];
-  if (codeLike?.kind === 'code') {
-    const s = dsl.scenes[codeLike.idx] as CodeScene;
+  if (codeLike) {
+    const s = dsl.scenes[codeLike.idx] as CodeScene | DiffScene;
     const fs = codeFont(s, dsl);
-    const lines = Math.max(1, prep.code.get(codeLike.idx)?.length ?? 1);
-    panels.push({ kind: 'code', idx: codeLike.idx, h: TITLE_H + PAD * 2 + Math.min(lines, 18) * lineH(fs) });
-  } else if (codeLike?.kind === 'diff') {
-    const s = dsl.scenes[codeLike.idx] as DiffScene;
-    const fs = codeFont(s, dsl);
-    const factors = diffLineFactors(prep, codeLike.idx, time - s.startTime);
-    const visible = factors.reduce((a, f) => a + f, 0);
-    panels.push({ kind: 'diff', idx: codeLike.idx, h: TITLE_H + PAD * 2 + Math.min(visible, 18) * lineH(fs) });
+    const plan = prep.morphs.get(codeLike.idx);
+    // STABLE height — size for the tallest state so the panel never resizes (and
+    // therefore never re-centers) mid-morph. A resizing panel is what read as jitter.
+    const rows = plan ? Math.max(1, plan.beforeRows, plan.afterRows) : 1;
+    panels.push({ kind: codeLike.kind, idx: codeLike.idx, h: TITLE_H + PAD * 2 + Math.min(rows, 18) * lineH(fs) });
   }
   if (termIdx >= 0) {
     const s = dsl.scenes[termIdx] as TerminalScene;
@@ -282,6 +239,10 @@ export function renderFrame(ctx: CanvasRenderingContext2D, prep: Prepared, time:
       strength: envelope(time, card.startTime, card.startTime + card.duration, 0.5, 0.45),
     });
   } else {
+    // dive toward the region of code that is changing right now
+    const mf = codeSlot ? morphFocusTarget(prep, codeSlot, time) : null;
+    if (mf) targets.push(mf);
+
     const hl = activeScene(dsl, 'highlight', time);
     if (hl && codeSlot && codeSlot.kind === 'code') {
       const code = dsl.scenes[codeSlot.idx] as CodeScene;
@@ -384,6 +345,7 @@ function drawWorld(
   let codeRect: Rect | null = null;
   let codeScene: CodeScene | null = null;
   let runBtn: Rect | null = null;
+  let codeSlot: PanelSlot | null = null;
 
   for (const p of panels) {
     const scene = dsl.scenes[p.idx];
@@ -394,14 +356,11 @@ function drawWorld(
     ctx.globalAlpha = enter;
     ctx.translate(0, (1 - enter) * 22);
 
-    if (p.kind === 'code') {
-      const r = drawCodePanel(ctx, prep, p.idx, p.rect, time);
+    if (p.kind === 'code' || p.kind === 'diff') {
+      const r = drawMorphPanel(ctx, prep, p.idx, p.rect, time);
       codeRect = p.rect;
-      codeScene = scene as CodeScene;
-      runBtn = r.runBtn;
-    } else if (p.kind === 'diff') {
-      const r = drawDiffPanel(ctx, prep, p.idx, p.rect, time);
-      codeRect = p.rect;
+      codeSlot = p;
+      if (p.kind === 'code') codeScene = scene as CodeScene;
       runBtn = r.runBtn;
     } else {
       drawTerminalPanel(ctx, scene as TerminalScene, p.rect, time, dsl);
@@ -417,6 +376,89 @@ function drawWorld(
   const click = activeScene(dsl, 'click', time);
   if (runBtn) drawRunButton(ctx, runBtn, click ? clamp((time - click.startTime) / click.duration, 0, 1) : -1);
   if (click && runBtn) drawClickFx(ctx, runBtn, time, click.startTime);
+
+  // the mascot acts on top of everything in the world
+  drawMascots(ctx, prep, time, codeSlot);
+}
+
+// ── Mascot scenes (overlay actors beside the current panel) ─────────────────────
+function drawMascots(ctx: CanvasRenderingContext2D, prep: Prepared, time: number, codeSlot: PanelSlot | null) {
+  const { dsl } = prep;
+  const W = dsl.width, H = dsl.height;
+  for (const s of dsl.scenes) {
+    if (s.type !== 'mascot') continue;
+    if (time < s.startTime - 1e-6 || time > s.startTime + s.duration) continue;
+    const m = s as MascotScene;
+    const local = time - s.startTime;
+    const scale = (H / 1080) * 0.95;
+
+    let x: number, y: number, flip = false;
+    let aimX: number | undefined, aimY: number | undefined;
+
+    if (codeSlot) {
+      const rect = codeSlot.rect;
+      const side = m.side === 'left' ? -1 : 1;
+      x = clamp(side < 0 ? rect.x - 96 * scale : rect.x + rect.w + 96 * scale, 74 * scale, W - 74 * scale);
+      y = Math.min(rect.y + rect.h + 8, H - 36);
+      flip = side > 0; // face the panel
+      if (m.line) {
+        const scene = dsl.scenes[codeSlot.idx] as CodeScene | DiffScene;
+        const fs = codeFont(scene, dsl);
+        aimX = side < 0 ? rect.x + 40 : rect.x + rect.w - 40;
+        aimY = rect.y + TITLE_H + PAD + (m.line - 1) * lineH(fs) + fs / 2;
+        y = clamp(aimY + 170 * scale, rect.y + TITLE_H + 190 * scale, H - 36);
+      }
+    } else {
+      x = W - 180 * scale;
+      y = H - 64;
+      flip = true;
+    }
+
+    drawMascot(ctx, {
+      x, y, scale,
+      action: m.action as MascotAction,
+      local,
+      life: s.duration,
+      aimX, aimY, flip,
+    });
+  }
+}
+
+/** Camera target following the changing region of a morphing code panel. */
+function morphFocusTarget(prep: Prepared, slot: PanelSlot, time: number): FocusTarget | null {
+  const plan = prep.morphs.get(slot.idx);
+  if (!plan || plan.pureAdd) return null; // first appearances read fine unzoomed
+  const scene = prep.dsl.scenes[slot.idx] as CodeScene | DiffScene;
+  const T = plan.timing;
+  const rows = plan.addedRows.length ? plan.addedRows : plan.removedRows;
+  if (!rows.length) return null;
+
+  const dsl = prep.dsl;
+  const fs = codeFont(scene, dsl);
+  const lh = lineH(fs);
+  const bodyY = slot.rect.y + TITLE_H + PAD;
+  const minR = Math.min(...rows);
+  const maxR = Math.max(...rows);
+  const cy = bodyY + ((minR + maxR) / 2 + 0.5) * lh;
+  const span = (maxR - minR + 1) * lh;
+  const lastAdd = plan.addedRows.length
+    ? addRowAt(T, plan.addedRows.length - 1) + T.lineReveal
+    : T.moveEnd;
+
+  return {
+    x: clamp(slot.rect.x + slot.rect.w / 2, dsl.width * 0.3, dsl.width * 0.7),
+    y: cy,
+    // gentle: a slight lean toward the change, not a lurch
+    zoom: span < lh * 7 ? 1.05 : 1.02,
+    strength:
+      envelope(
+        time,
+        scene.startTime + T.moveStart - 0.15,
+        scene.startTime + lastAdd + 0.9,
+        0.7,
+        0.85,
+      ) * 0.7,
+  };
 }
 
 // ── Sprites (template + keyframe tweens) ────────────────────────────────────────────
@@ -582,10 +624,16 @@ function drawChrome(ctx: CanvasRenderingContext2D, rect: Rect, title: string, ac
   return { x: rect.x + PAD, y: rect.y + TITLE_H + PAD, w: rect.w - PAD * 2, h: rect.h - TITLE_H - PAD * 2 };
 }
 
-// ── Code panel ────────────────────────────────────────────────────────────────────
-function drawCodePanel(ctx: CanvasRenderingContext2D, prep: Prepared, idx: number, rect: Rect, time: number): { runBtn: Rect } {
+// ── Morph panel ───────────────────────────────────────────────────────────────────
+// One renderer for `code` (morph from empty) and `diff` (morph between states).
+// Kept tokens SLIDE from their old grid cell to their new one, removed tokens
+// fade where they were, added tokens land line-by-line with a soft rise. No
+// typewriter, no per-character clatter — the code reads as *edited*, not typed.
+function drawMorphPanel(ctx: CanvasRenderingContext2D, prep: Prepared, idx: number, rect: Rect, time: number): { runBtn: Rect } {
   const dsl = prep.dsl;
-  const scene = dsl.scenes[idx] as CodeScene;
+  const scene = dsl.scenes[idx] as CodeScene | DiffScene;
+  const plan = prep.morphs.get(idx)!;
+  const T = plan.timing;
   const body = drawChrome(ctx, rect, scene.title || langLabel(scene.language));
 
   const fs = codeFont(scene, dsl);
@@ -595,227 +643,108 @@ function drawCodePanel(ctx: CanvasRenderingContext2D, prep: Prepared, idx: numbe
   const charW = ctx.measureText('M').width;
   const gutterW = fs * 2.4;
   const baseY = body.y + fs;
-
-  const lines = prep.code.get(idx) || [];
-  const sched = prep.schedule.get(idx) || [];
-  const total = scene.code.length;
   const local = time - scene.startTime;
-  const shown = revealedCount(sched, local); // human timing: pauses + bursts
-  const done = shown >= total;
 
-  const prefix: number[] = [];
-  let acc = 0;
-  for (let li = 0; li < lines.length; li++) { prefix[li] = acc; acc += lines[li].length + 1; }
-
-  /** Column/row of the caret after `n` chars are on screen. */
-  const cellAt = (n: number) => {
-    let li = 0;
-    for (let i = 0; i < lines.length; i++) {
-      if (n >= prefix[i]) li = i;
-      else break;
-    }
-    const col = Math.min(n - prefix[li], lines[li]?.length ?? 0);
-    return { x: body.x + gutterW + col * charW, y: baseY + li * lh, li };
-  };
-
-  const head = cellAt(shown);
+  const moveP = easeInOut(clamp((local - T.moveStart) / Math.max(T.moveEnd - T.moveStart, 0.01), 0, 1));
+  const rowY = (r: number) => baseY + r * lh;
+  const colX = (c: number) => body.x + gutterW + c * charW;
+  const orderOf = new Map(plan.addedRows.map((r, i) => [r, i]));
+  const removedSet = new Set(plan.removedRows);
+  const rowRevealAt = (r: number) => addRowAt(T, orderOf.get(r) ?? 0);
 
   ctx.save();
   roundRect(ctx, rect.x, rect.y + TITLE_H, rect.w, rect.h - TITLE_H, 18);
   ctx.clip();
 
-  // active-line wash behind the line being typed
-  if (!done) {
-    ctx.fillStyle = 'rgba(167,139,250,0.05)';
-    ctx.fillRect(rect.x + 4, head.y - fs, rect.w - 8, lh);
+  // the line that landed most recently gets a fading focus wash
+  let newest = -1;
+  let newestAt = -Infinity;
+  for (const r of plan.addedRows) {
+    const at = rowRevealAt(r);
+    if (local >= at && at > newestAt) { newest = r; newestAt = at; }
+  }
+  if (newest >= 0) {
+    const glow = 1 - clamp((local - newestAt) / 0.9, 0, 1);
+    if (glow > 0.01) {
+      ctx.fillStyle = `rgba(167,139,250,${0.07 * glow})`;
+      ctx.fillRect(rect.x + 6, rowY(newest) - fs, rect.w - 12, lh);
+    }
   }
 
-  // line-number gutter
+  // removed rows: red wash + − marker through the hold, gone with the move
+  if (!plan.pureAdd) {
+    const holdIn = easeInOut(clamp(local / 0.3, 0, 1));
+    for (const r of plan.removedRows) {
+      const a = holdIn * (1 - moveP);
+      if (a <= 0.01) continue;
+      ctx.fillStyle = `rgba(248,113,113,${0.1 * a})`;
+      ctx.fillRect(rect.x + 6, rowY(r) - fs, rect.w - 12, lh);
+      ctx.fillStyle = `rgba(248,113,113,${0.7 * a})`;
+      ctx.font = `${Math.round(fs * 0.7)}px ${MONO}`;
+      ctx.fillText('−', body.x, rowY(r));
+    }
+  }
+
+  // line numbers: BEFORE grid fades out with the move, AFTER grid fades in
   ctx.font = `${Math.round(fs * 0.68)}px ${MONO}`;
-  for (let li = 0; li < lines.length; li++) {
-    const lineShown = shown > prefix[li];
-    ctx.fillStyle = !done && li === head.li ? 'rgba(167,139,250,0.55)' : 'rgba(255,255,255,0.13)';
-    if (lineShown || li === 0) ctx.fillText(String(li + 1).padStart(2, ' '), body.x, baseY + li * lh);
+  if (!plan.pureAdd && moveP < 0.999) {
+    for (let r = 0; r < plan.beforeRows; r++) {
+      if (removedSet.has(r)) continue; // the − marker owns that slot
+      ctx.fillStyle = `rgba(255,255,255,${0.13 * (1 - moveP)})`;
+      ctx.fillText(String(r + 1).padStart(2, ' '), body.x, rowY(r));
+    }
+  }
+  for (let r = 0; r < plan.afterRows; r++) {
+    const ord = orderOf.get(r);
+    const a = ord != null
+      ? easeOutCubic(clamp((local - rowRevealAt(r)) / T.lineReveal, 0, 1))
+      : plan.pureAdd ? 1 : moveP;
+    if (a <= 0.01) continue;
+    const fresh = r === newest && local - newestAt < 0.9;
+    ctx.fillStyle = fresh ? `rgba(167,139,250,${0.6 * a})` : `rgba(255,255,255,${0.13 * a})`;
+    ctx.fillText(String(r + 1).padStart(2, ' '), body.x, rowY(r));
   }
   ctx.fillStyle = C.sep;
   ctx.fillRect(body.x + gutterW - fs * 0.7, body.y - PAD + 6, 1, rect.h - TITLE_H - 12);
   ctx.font = `${fs}px ${MONO}`;
 
-  for (let li = 0; li < lines.length; li++) {
-    const y = baseY + li * lh;
-    const cells = lines[li];
-    for (let c = 0; c < cells.length; c++) {
-      const g = prefix[li] + c;
-      const age = local - (sched[g] ?? Infinity);
-      if (age <= 0) continue;
-      const cell = cells[c];
-      if (cell.ch !== ' ') {
-        const k = clamp(age / CHAR_FADE, 0, 1);
-        ctx.globalAlpha = k;
-        ctx.fillStyle = cell.color;
-        ctx.fillText(cell.ch, body.x + gutterW + c * charW, y - (1 - easeOutCubic(k)) * CHAR_RISE);
-        ctx.globalAlpha = 1;
+  // tokens: each drawn as ONE crisp string on the monospace grid. Resting tokens
+  // snap to integer pixels (no shimmer); only tokens actively sliding/landing move.
+  const atRest = moveP >= 0.999;
+  for (const tok of plan.tokens) {
+    let x: number;
+    let y: number;
+    let a = 1;
+    if (tok.kind === 'kept') {
+      if (atRest || tok.fromCol === tok.toCol && tok.fromRow === tok.toRow) {
+        x = colX(tok.toCol); y = rowY(tok.toRow);
+      } else {
+        x = lerp(colX(tok.fromCol), colX(tok.toCol), moveP);
+        y = lerp(rowY(tok.fromRow), rowY(tok.toRow), moveP);
       }
+    } else if (tok.kind === 'remove') {
+      const fade = 1 - easeInOut(clamp((local - T.moveStart) / 0.35, 0, 1));
+      if (fade <= 0.01) continue;
+      a = fade;
+      x = colX(tok.fromCol);
+      y = rowY(tok.fromRow) + (1 - fade) * 8;
+    } else {
+      const at = rowRevealAt(tok.toRow) + Math.min(0.12, tok.toCol * 0.006);
+      const p = easeOutCubic(clamp((local - at) / T.lineReveal, 0, 1));
+      if (p <= 0.01) continue;
+      a = p;
+      x = colX(tok.toCol);
+      y = rowY(tok.toRow) - (1 - p) * 10;
+      if (p >= 0.999) { /* landed — draw on the grid */ }
     }
+    ctx.globalAlpha = a;
+    ctx.fillStyle = tok.color;
+    // integer pixels keep glyphs sharp; monospace advance == charW so the whole
+    // string lands exactly where per-character placement would, but crisper
+    ctx.fillText(tok.text, Math.round(x), Math.round(y));
+    ctx.globalAlpha = 1;
   }
   ctx.restore();
-
-  // gliding caret: slides from the previous cell onto the fresh one
-  if (scene.cursorVisible !== false) {
-    let cx = head.x, cy = head.y;
-    if (shown > 0 && !done) {
-      const prevCell = cellAt(shown - 1);
-      const p = easeOutCubic(clamp((local - (sched[shown - 1] ?? 0)) / CARET_GLIDE, 0, 1));
-      cx = lerp(prevCell.x + charW, head.x, p);
-      cy = lerp(prevCell.y, head.y, p);
-    }
-    const vis = done ? (Math.floor(time * 1.6) % 2 === 0 ? 1 : 0) : 1;
-    if (vis) {
-      ctx.save();
-      ctx.shadowColor = withAlpha(C.accent, 0.8);
-      ctx.shadowBlur = 10;
-      ctx.fillStyle = C.accent;
-      ctx.fillRect(cx + 1, cy - fs + 2, 3, fs + 3);
-      ctx.restore();
-    }
-  }
-
-  const btnW = 96, btnH = 32;
-  return { runBtn: { x: rect.x + rect.w - btnW - 16, y: rect.y + (TITLE_H - btnH) / 2, w: btnW, h: btnH } };
-}
-
-// ── Diff panel ────────────────────────────────────────────────────────────────────
-// Phases (see lib/diff.ts): old code sits with removals tinted red → removed
-// lines collapse → added lines expand + type in. Kept lines are always shown.
-const LINE_EXPAND = 0.18; // s a new line takes to open up before its chars type
-
-/** Per-line height factor (0..1) at `local` seconds into the diff scene. */
-function diffLineFactors(prep: Prepared, idx: number, local: number): number[] {
-  const lines = prep.diffs.get(idx) || [];
-  const hold = diffHold(lines);
-  const typeStart = diffTypeStart(lines);
-  return lines.map((l) => {
-    if (l.kind === 'kept') return 1;
-    if (l.kind === 'removed') {
-      // full height through the hold, then collapse
-      return 1 - easeInOut(clamp((local - hold) / DIFF_COLLAPSE, 0, 1));
-    }
-    const at = l.firstCharAt ?? typeStart;
-    return easeInOut(clamp((local - (at - LINE_EXPAND)) / LINE_EXPAND, 0, 1));
-  });
-}
-
-function drawDiffPanel(ctx: CanvasRenderingContext2D, prep: Prepared, idx: number, rect: Rect, time: number): { runBtn: Rect } {
-  const dsl = prep.dsl;
-  const scene = dsl.scenes[idx] as DiffScene;
-  const body = drawChrome(ctx, rect, scene.title || langLabel(scene.language));
-
-  const fs = codeFont(scene, dsl);
-  const lh = lineH(fs);
-  ctx.font = `${fs}px ${MONO}`;
-  ctx.textBaseline = 'alphabetic';
-  const charW = ctx.measureText('M').width;
-  const gutterW = fs * 2.4;
-  const baseY = body.y + fs;
-
-  const lines = prep.diffs.get(idx) || [];
-  const sched = prep.schedule.get(idx) || [];
-  const local = time - scene.startTime;
-  const factors = diffLineFactors(prep, idx, local);
-  const shown = revealedCount(sched, local);
-  const total = sched.length;
-  const done = shown >= total;
-
-  ctx.save();
-  roundRect(ctx, rect.x, rect.y + TITLE_H, rect.w, rect.h - TITLE_H, 18);
-  ctx.clip();
-
-  let y = baseY;
-  let headX = body.x + gutterW;
-  let headY = baseY;
-  let lineNo = 1;
-
-  for (let li = 0; li < lines.length; li++) {
-    const f = factors[li];
-    if (f <= 0.01) continue;
-    const l = lines[li];
-    const rowH = lh * f;
-    const rowTop = y - fs; // top of this row's text box
-
-    ctx.save();
-    if (f < 1) {
-      // collapsing/expanding rows squeeze: clip to their shrinking slot
-      ctx.beginPath();
-      ctx.rect(rect.x, rowTop, rect.w, rowH);
-      ctx.clip();
-      ctx.globalAlpha = f;
-    }
-
-    // row tint + gutter marker
-    if (l.kind === 'removed') {
-      ctx.fillStyle = 'rgba(248,113,113,0.09)';
-      ctx.fillRect(rect.x + 6, rowTop, rect.w - 12, rowH);
-      ctx.fillStyle = 'rgba(248,113,113,0.7)';
-      ctx.font = `${Math.round(fs * 0.7)}px ${MONO}`;
-      ctx.fillText('−', body.x, y);
-    } else if (l.kind === 'added' && !done) {
-      ctx.fillStyle = 'rgba(52,211,153,0.07)';
-      ctx.fillRect(rect.x + 6, rowTop, rect.w - 12, rowH);
-      ctx.fillStyle = 'rgba(52,211,153,0.7)';
-      ctx.font = `${Math.round(fs * 0.7)}px ${MONO}`;
-      ctx.fillText('+', body.x, y);
-    } else {
-      ctx.fillStyle = 'rgba(255,255,255,0.13)';
-      ctx.font = `${Math.round(fs * 0.7)}px ${MONO}`;
-      ctx.fillText(String(lineNo).padStart(2, ' '), body.x, y);
-    }
-    ctx.font = `${fs}px ${MONO}`;
-
-    if (l.kind === 'added') {
-      const off = l.charOffset ?? 0;
-      for (let c = 0; c < l.cells.length; c++) {
-        const at = sched[off + c];
-        const age = local - (at ?? Infinity);
-        if (age <= 0) break;
-        const cell = l.cells[c];
-        if (cell.ch !== ' ') {
-          const k = clamp(age / CHAR_FADE, 0, 1);
-          ctx.globalAlpha = Math.min(f, k);
-          ctx.fillStyle = cell.color;
-          ctx.fillText(cell.ch, body.x + gutterW + c * charW, y - (1 - easeOutCubic(k)) * CHAR_RISE);
-          ctx.globalAlpha = f < 1 ? f : 1;
-        }
-        headX = body.x + gutterW + (c + 1) * charW;
-        headY = y;
-      }
-    } else {
-      // kept/removed lines: full text, entrance handled by panel fade
-      for (let c = 0; c < l.cells.length; c++) {
-        const cell = l.cells[c];
-        if (cell.ch === ' ') continue;
-        if (l.kind === 'removed') ctx.globalAlpha = f * 0.75;
-        ctx.fillStyle = cell.color;
-        ctx.fillText(cell.ch, body.x + gutterW + c * charW, y);
-        ctx.globalAlpha = f < 1 ? f : 1;
-      }
-    }
-
-    ctx.restore();
-    if (l.kind !== 'removed') lineNo++;
-    y += rowH;
-  }
-  ctx.restore();
-
-  // caret on the typing head
-  const vis = done ? (Math.floor(time * 1.6) % 2 === 0 ? 1 : 0) : 1;
-  if (vis && local >= diffTypeStart(lines) - LINE_EXPAND) {
-    ctx.save();
-    ctx.shadowColor = withAlpha(C.accent, 0.8);
-    ctx.shadowBlur = 10;
-    ctx.fillStyle = C.accent;
-    ctx.fillRect(headX + 1, headY - fs + 2, 3, fs + 3);
-    ctx.restore();
-  }
 
   const btnW = 96, btnH = 32;
   return { runBtn: { x: rect.x + rect.w - btnW - 16, y: rect.y + (TITLE_H - btnH) / 2, w: btnW, h: btnH } };
@@ -1489,6 +1418,29 @@ function drawQuizCard(ctx: CanvasRenderingContext2D, scene: QuizScene, time: num
       ctx.fillText(l, W / 2, lay.card.y + lay.card.h + 44 + i * eFs * 1.5);
     });
     ctx.textAlign = 'left';
+  }
+
+  // Bit sits beside the card and reacts: thinking while the learner decides,
+  // celebrating a right answer, shocked by a wrong one. In export (no ui) it
+  // celebrates at the timed reveal so the character survives into the video.
+  const mascotLocal = quiz
+    ? ui?.uiTime ?? 0
+    : revealed ? local - quizRevealAt(scene) : -1;
+  if (mascotLocal >= 0) {
+    ctx.globalAlpha = a;
+    const action: MascotAction = quiz
+      ? quiz.selected == null ? 'think' : quiz.correct ? 'celebrate' : 'shocked'
+      : 'celebrate';
+    drawMascot(ctx, {
+      x: lay.card.x - 104 * (H / 1080),
+      y: lay.card.y + lay.card.h,
+      scale: (H / 1080) * 0.82,
+      action,
+      local: mascotLocal,
+      life: Infinity,
+      aimX: lay.card.x + lay.card.w * 0.25,
+      aimY: lay.card.y + 60,
+    });
   }
   ctx.restore();
 }

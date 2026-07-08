@@ -102,14 +102,15 @@ export class SoundEngine {
     src.start();
   }
 
-  /** One keystroke. Pass the character so enter/space get their own voice. */
+  /** One keystroke (terminal output only). Kept deliberately quiet — the old
+   *  full-volume clatter was the #1 listener complaint. */
   keystroke(ch?: string) {
     if (ch === '\n' && this.buffers.enter) {
-      this.play(this.buffers.enter, 0.5 + Math.random() * 0.1, 0.97 + Math.random() * 0.06);
+      this.play(this.buffers.enter, 0.26 + Math.random() * 0.06, 0.97 + Math.random() * 0.06);
       return;
     }
     if (ch === ' ' && this.buffers.space) {
-      this.play(this.buffers.space, 0.42 + Math.random() * 0.1, 0.96 + Math.random() * 0.08);
+      this.play(this.buffers.space, 0.2 + Math.random() * 0.06, 0.96 + Math.random() * 0.08);
       return;
     }
     const keys = this.buffers.keys;
@@ -118,21 +119,21 @@ export class SoundEngine {
     let v = Math.floor(Math.random() * keys.length);
     if (keys.length > 1 && v === this.lastKeyVariant) v = (v + 1) % keys.length;
     this.lastKeyVariant = v;
-    this.play(keys[v], 0.38 + Math.random() * 0.14, 0.93 + Math.random() * 0.13);
+    this.play(keys[v], 0.17 + Math.random() * 0.07, 0.93 + Math.random() * 0.13);
   }
 
   click() {
     this.play(this.buffers.click, 0.8, 0.98 + Math.random() * 0.04);
   }
 
-  /** Scene transition breath (chapter/title cards). */
-  whoosh() {
-    this.play(this.buffers.whoosh, 0.5, 0.96 + Math.random() * 0.08);
+  /** Scene transition breath (chapter/title cards, code morphs). */
+  whoosh(volume = 0.5) {
+    this.play(this.buffers.whoosh, volume, 0.96 + Math.random() * 0.08);
   }
 
-  /** Small reveal tick (bullets, diagram nodes). */
-  pop() {
-    this.play(this.buffers.pop, 0.45, 0.95 + Math.random() * 0.12);
+  /** Small reveal tick (bullets, diagram nodes, landing code lines). */
+  pop(volume = 0.45, rate?: number) {
+    this.play(this.buffers.pop, volume, rate ?? 0.95 + Math.random() * 0.12);
   }
 
   /** Quiz answered correctly. */

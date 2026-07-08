@@ -1,7 +1,10 @@
 import { AnimationDSL, AnimProp, Easing, Keyframe, Scene } from './types';
 import { clamp } from './utils';
 import { typeDuration } from './timing';
-import { addedText, diffLines, diffTypeStart } from './diff';
+import { diffLines } from './diff';
+import { morphTiming } from './morph';
+
+const MASCOT_ACTIONS = ['wave', 'point', 'think', 'celebrate', 'shocked', 'idle'];
 
 const ANIM_PROPS: AnimProp[] = ['x', 'y', 'scaleX', 'scaleY', 'rotation', 'opacity'];
 const EASINGS: Easing[] = ['linear', 'easeInOut', 'easeInCubic', 'easeOutCubic', 'easeOutBack'];
@@ -196,6 +199,14 @@ export function normalizeDSL(raw: any): AnimationDSL {
           text: String(s.text ?? s.title ?? 'Chapter'),
           ...base,
         };
+      case 'mascot':
+        return {
+          type: 'mascot',
+          action: MASCOT_ACTIONS.includes(s.action) ? s.action : 'wave',
+          line: isFinite(Number(s.line)) && Number(s.line) > 0 ? Math.round(Number(s.line)) : undefined,
+          side: s.side === 'left' ? 'left' : 'right',
+          ...base,
+        };
       case 'quiz': {
         const options = Array.isArray(s.options)
           ? s.options.map((o: any) => String(o)).filter(Boolean).slice(0, 4)
@@ -275,8 +286,8 @@ export function extractJSON(text: string): string {
 export function repace(dsl: AnimationDSL): AnimationDSL {
   if (dsl.scenes.some((s) => s.type === 'sprite')) return dsl;
 
-  const SECTION_GAP = 0.45;
-  const AFTER_CLICK_PAUSE = 1.0;
+  const SECTION_GAP = 0.22;
+  const AFTER_CLICK_PAUSE = 0.8;
   let cursor = 0;
   let panelStart = 0;
   let panelEnd = 0;
@@ -284,15 +295,17 @@ export function repace(dsl: AnimationDSL): AnimationDSL {
   const scenes: Scene[] = dsl.scenes.map((s): Scene => {
     switch (s.type) {
       case 'code': {
-        // slow, human typing speed; typeDuration accounts for per-line pauses
-        const speed = clamp(s.typingSpeed * 0.6, 5, 8.5);
-        const typeDur = typeDuration(s.code, speed);
+        // morph-from-empty: lines cascade in, then a SHORT buffer. The real hold
+        // comes from narration (paceToNarration) — a big fixed pad would leave
+        // silent dead air, so keep it tight and let the voice own the pacing.
+        const T = morphTiming(diffLines('', s.code));
+        const readTime = clamp(s.code.split('\n').length * 0.15, 0.5, 1.6);
         const start = cursor;
-        const duration = typeDur + 0.6;
+        const duration = T.total + readTime;
         panelStart = start;
         panelEnd = start + duration;
         cursor = panelEnd + SECTION_GAP;
-        return { ...s, typingSpeed: speed, startTime: start, duration };
+        return { ...s, startTime: start, duration };
       }
       case 'terminal': {
         const speed = clamp(s.typingSpeed * 0.75, 10, 34);
@@ -305,15 +318,17 @@ export function repace(dsl: AnimationDSL): AnimationDSL {
         return { ...s, typingSpeed: speed, startTime: start, duration };
       }
       case 'diff': {
-        const speed = clamp(s.typingSpeed * 0.6, 5, 8.5);
+        // magic-move morph: kept code slides, removals fade, additions land.
+        // Short buffer only; narration owns the hold (see code case above).
         const lines = diffLines(s.before, s.after);
-        const typeDur = typeDuration(addedText(lines), speed);
+        const T = morphTiming(lines);
+        const readTime = clamp(lines.filter((l) => l.kind === 'added').length * 0.2, 0.5, 1.6);
         const start = cursor;
-        const duration = diffTypeStart(lines) + typeDur + 0.8;
+        const duration = T.total + readTime;
         panelStart = start;
         panelEnd = start + duration;
         cursor = panelEnd + SECTION_GAP;
-        return { ...s, typingSpeed: speed, startTime: start, duration };
+        return { ...s, startTime: start, duration };
       }
       case 'title':
       case 'chapter':
@@ -365,6 +380,7 @@ export function repace(dsl: AnimationDSL): AnimationDSL {
         return { ...s, startTime: start };
       }
       case 'text':
+      case 'mascot':
       case 'highlight': {
         // overlay on the current section (does not consume the timeline)
         if (panelEnd > 0) {
@@ -395,7 +411,7 @@ export function paceToNarration(
   dsl: AnimationDSL,
   narrationSeconds: Map<number, number>,
 ): AnimationDSL {
-  const PAD = 0.45; // breathing room after the voice stops
+  const PAD = 0.28; // breathing room after the voice stops (keep short — silence reads as "broken")
 
   const events: { at: number; delta: number }[] = [];
   const grown = new Map<number, number>();

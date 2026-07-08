@@ -13,8 +13,11 @@ import {
   Captions,
   Mic,
   MicOff,
+  FlaskConical,
+  CheckCircle2,
 } from 'lucide-react';
 import { AnimationDSL, QuizScene } from '@/lib/types';
+import { Playground } from './Playground';
 import { Prepared, prepare, renderFrame, RenderUI } from '@/lib/renderer';
 import { SoundEngine } from '@/lib/sounds';
 import { Conductor } from '@/lib/conductor';
@@ -113,6 +116,8 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
   const [showSettings, setShowSettings] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [quiz, setQuiz] = useState<{ idx: number; selected: number | null; correct: boolean | null } | null>(null);
+  const [playground, setPlayground] = useState<{ code: string; language: string; title?: string } | null>(null);
+  const [score, setScore] = useState({ correct: 0, total: 0 });
 
   const hasNarration = dsl.scenes.some((s) => s.narration);
   const [voiceOn, setVoiceOn] = useState(true);
@@ -144,6 +149,8 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
     playingRef.current = false;
     setPlaying(false);
     setQuiz(null);
+    setPlayground(null);
+    setScore({ correct: 0, total: 0 });
     quizUiRef.current = undefined;
     answeredRef.current.clear();
     engineRef.current?.stopNarration();
@@ -266,6 +273,7 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
       timeRef.current = 0;
       setTime(0);
       answeredRef.current.clear();
+      setScore({ correct: 0, total: 0 });
     }
     conductorRef.current!.rate = speedRef.current;
     conductorRef.current?.reset(timeRef.current);
@@ -311,6 +319,7 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
       answeredRef.current.add(quiz.idx);
       quizUiRef.current = { quiz: { selected: choice, correct } };
       setQuiz({ ...quiz, selected: choice, correct });
+      setScore((s) => ({ correct: s.correct + (correct ? 1 : 0), total: s.total + 1 }));
       if (correct) engineRef.current?.chime();
       else engineRef.current?.buzz();
       onQuizResult?.(correct);
@@ -318,6 +327,57 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
     },
     [quiz, draw, onQuizResult],
   );
+
+  // while a checkpoint holds the timeline, the mascot still needs to act —
+  // drive overlay animation from the wall clock via ui.uiTime
+  useEffect(() => {
+    if (!quiz) return;
+    const started = performance.now();
+    let raf = 0;
+    const loop = () => {
+      if (quizUiRef.current?.quiz) {
+        quizUiRef.current = {
+          ...quizUiRef.current,
+          uiTime: (performance.now() - started) / 1000,
+        };
+        draw(timeRef.current);
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [quiz?.idx, quiz?.selected, quiz, draw]);
+
+  // ── Playground (pause-to-tinker) ──
+  /** The code the lesson is showing at time `t` (latest code/diff scene). */
+  const codeAt = useCallback((t: number) => {
+    const scenes = prepRef.current?.dsl.scenes || [];
+    let best: { code: string; language: string; title?: string } | null = null;
+    let bestStart = -1;
+    for (const s of scenes) {
+      if (s.startTime > t + 1e-6 || s.startTime < bestStart) continue;
+      if (s.type === 'code') {
+        best = { code: s.code, language: s.language, title: s.title };
+        bestStart = s.startTime;
+      } else if (s.type === 'diff') {
+        best = { code: s.after, language: s.language, title: s.title };
+        bestStart = s.startTime;
+      }
+    }
+    return best;
+  }, []);
+
+  const hasCode = useMemo(
+    () => adsl.scenes.some((s) => (s.type === 'code' || s.type === 'diff') && s.startTime <= time + 1e-6),
+    [adsl, time],
+  );
+
+  const openPlayground = useCallback(() => {
+    const cc = codeAt(timeRef.current);
+    if (!cc) return;
+    pause();
+    setPlayground(cc);
+  }, [codeAt, pause]);
 
   const continueAfterQuiz = useCallback(() => {
     if (!quiz) return;
@@ -393,6 +453,7 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (playground) return; // the playground owns the keyboard
       switch (e.key) {
         case ' ':
         case 'k':
@@ -417,7 +478,7 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [play, pause, seek, toggleMute, toggleCaptions, toggleFullscreen]);
+  }, [play, pause, seek, toggleMute, toggleCaptions, toggleFullscreen, playground]);
 
   // ── Seekbar interaction ──
   const barRef = useRef<HTMLDivElement>(null);
@@ -522,7 +583,7 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
           </button>
         )}
 
-        {quizScene && (
+        {quizScene && !playground && (
           <QuizOverlay
             scene={quizScene}
             frameW={adsl.width}
@@ -531,6 +592,15 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
             correct={quiz!.correct}
             onAnswer={answerQuiz}
             onContinue={continueAfterQuiz}
+          />
+        )}
+
+        {playground && (
+          <Playground
+            code={playground.code}
+            language={playground.language}
+            title={playground.title}
+            onClose={() => setPlayground(null)}
           />
         )}
 
@@ -566,9 +636,19 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
             <span className="time">
               {formatTime(time)} <em>/</em> {formatTime(adsl.duration)}
             </span>
+            {score.total > 0 && (
+              <span className="score" title="checkpoints">
+                <CheckCircle2 size={13} /> {score.correct}/{score.total}
+              </span>
+            )}
 
             <span className="grow" />
 
+            {hasCode && (
+              <button className="ib txt tinker" onClick={openPlayground} aria-label="Open playground">
+                <FlaskConical size={14} /> tinker
+              </button>
+            )}
             <button className="ib txt" onClick={cycleSpeed} aria-label="Playback speed">
               {speed}×
             </button>
@@ -694,6 +774,14 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
         .ib.txt { width: auto; padding: 0 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
         .time { font-size: 12px; color: rgba(236, 235, 242, 0.75); font-variant-numeric: tabular-nums; margin-left: 6px; }
         .time em { font-style: normal; color: var(--dimmer); }
+        .score {
+          display: inline-flex; align-items: center; gap: 5px;
+          margin-left: 10px; padding: 3px 9px; border-radius: 999px;
+          font-size: 11.5px; font-weight: 700; color: var(--green);
+          background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.3);
+        }
+        .ib.tinker { color: var(--accent); font-weight: 700; }
+        .ib.tinker:hover { background: rgba(167, 139, 250, 0.14); }
 
         .settings {
           display: flex; align-items: center; gap: 10px;
