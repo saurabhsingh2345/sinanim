@@ -9,6 +9,10 @@ export interface BaseScene {
   startTime: number;
   /** Seconds this scene is on screen. */
   duration: number;
+  /** Spoken voiceover for this scene, synthesized locally (Kokoro TTS). */
+  narration?: string;
+  /** Set by the narration pipeline: seconds the synthesized speech lasts. */
+  narrationDuration?: number;
 }
 
 export interface CodeScene extends BaseScene {
@@ -60,6 +64,26 @@ export interface HighlightScene extends BaseScene {
   color?: string;
 }
 
+export interface TitleScene extends BaseScene {
+  type: 'title';
+  text: string;
+  subtitle?: string;
+  accentColor?: string;
+}
+
+/** Code evolving from `before` to `after`: kept lines stay, removed lines
+ *  collapse away, added lines are typed in — the core tutorial pattern. */
+export interface DiffScene extends BaseScene {
+  type: 'diff';
+  language: string;
+  before: string;
+  after: string;
+  /** Characters per second while typing added lines. */
+  typingSpeed: number;
+  fontSize?: number;
+  title?: string;
+}
+
 // ── Sprite / template animation ────────────────────────────────────────────────
 // A generic, deterministic visual layer: a named template (drawn from canvas
 // primitives in lib/templates.ts) whose transform is driven by keyframes. This is
@@ -95,6 +119,69 @@ export interface SpriteScene extends BaseScene {
   animations: Keyframe[];
 }
 
+// ── Card scenes ────────────────────────────────────────────────────────────────
+// Full-frame explanatory beats between code sections. Like title cards, an
+// active card owns the frame.
+
+export interface BulletsScene extends BaseScene {
+  type: 'bullets';
+  title?: string;
+  /** Short points, revealed one by one in sync with the narration. */
+  items: string[];
+}
+
+export interface DiagramNode {
+  id: string;
+  label: string;
+  /** Position as fractions of width/height (0..1). */
+  x: number;
+  y: number;
+  color?: string;
+}
+
+export interface DiagramEdge {
+  from: string;
+  to: string;
+  label?: string;
+}
+
+export interface DiagramScene extends BaseScene {
+  type: 'diagram';
+  title?: string;
+  nodes: DiagramNode[];
+  edges: DiagramEdge[];
+}
+
+export interface QuoteScene extends BaseScene {
+  type: 'quote';
+  text: string;
+  attribution?: string;
+}
+
+export interface BigStatScene extends BaseScene {
+  type: 'bigstat';
+  /** Headline value, e.g. "10x" or "300ms". Numeric part counts up. */
+  value: string;
+  label: string;
+}
+
+/** Section divider: "01 — Setting up". */
+export interface ChapterScene extends BaseScene {
+  type: 'chapter';
+  number?: number;
+  text: string;
+}
+
+/** Interactive checkpoint. The player pauses here and waits for an answer;
+ *  in exported video it becomes a timed question → answer reveal. */
+export interface QuizScene extends BaseScene {
+  type: 'quiz';
+  question: string;
+  options: string[];
+  answerIndex: number;
+  explanation?: string;
+}
+
 export type Scene =
   | CodeScene
   | TerminalScene
@@ -102,7 +189,15 @@ export type Scene =
   | ClickScene
   | WaitScene
   | HighlightScene
-  | SpriteScene;
+  | TitleScene
+  | DiffScene
+  | SpriteScene
+  | BulletsScene
+  | DiagramScene
+  | QuoteScene
+  | BigStatScene
+  | ChapterScene
+  | QuizScene;
 
 export interface AnimationDSL {
   title: string;
@@ -111,5 +206,9 @@ export interface AnimationDSL {
   width: number;
   height: number;
   backgroundColor: string;
+  /** Kokoro voice id for narration, e.g. "af_heart". */
+  voice?: string;
+  /** Burn narration subtitles into the frame (default true when narration exists). */
+  captions?: boolean;
   scenes: Scene[];
 }

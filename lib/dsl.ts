@@ -1,6 +1,7 @@
 import { AnimationDSL, AnimProp, Easing, Keyframe, Scene } from './types';
 import { clamp } from './utils';
 import { typeDuration } from './timing';
+import { addedText, diffLines, diffTypeStart } from './diff';
 
 const ANIM_PROPS: AnimProp[] = ['x', 'y', 'scaleX', 'scaleY', 'rotation', 'opacity'];
 const EASINGS: Easing[] = ['linear', 'easeInOut', 'easeInCubic', 'easeOutCubic', 'easeOutBack'];
@@ -21,7 +22,7 @@ const DEFAULTS = {
   fps: 30,
   width: 1920,
   height: 1080,
-  backgroundColor: '#0d0d0f',
+  backgroundColor: '#0b0b10',
 };
 
 /**
@@ -49,7 +50,14 @@ export function normalizeDSL(raw: any): AnimationDSL {
         : cursor;
     cursor = startTime + duration;
 
-    const base = { startTime, duration };
+    const base = {
+      startTime,
+      duration,
+      narration:
+        typeof s.narration === 'string' && s.narration.trim()
+          ? s.narration.trim()
+          : undefined,
+    };
 
     switch (s.type) {
       case 'code':
@@ -101,6 +109,25 @@ export function normalizeDSL(raw: any): AnimationDSL {
           color: s.color ? String(s.color) : undefined,
           ...base,
         };
+      case 'title':
+        return {
+          type: 'title',
+          text: String(s.text ?? s.content ?? 'Untitled'),
+          subtitle: s.subtitle ? String(s.subtitle) : undefined,
+          accentColor: s.accentColor ? String(s.accentColor) : undefined,
+          ...base,
+        };
+      case 'diff':
+        return {
+          type: 'diff',
+          language: String(s.language || 'text'),
+          before: String(s.before ?? ''),
+          after: String(s.after ?? ''),
+          typingSpeed: clamp(Number(s.typingSpeed) || 18, 4, 80),
+          fontSize: Number(s.fontSize) || undefined,
+          title: s.title ? String(s.title) : undefined,
+          ...base,
+        };
       case 'sprite':
         return {
           type: 'sprite',
@@ -114,6 +141,74 @@ export function normalizeDSL(raw: any): AnimationDSL {
             : [],
           ...base,
         };
+      case 'bullets':
+        return {
+          type: 'bullets',
+          title: s.title ? String(s.title) : undefined,
+          items: Array.isArray(s.items)
+            ? s.items.map((it: any) => String(it)).filter(Boolean).slice(0, 8)
+            : [],
+          ...base,
+        };
+      case 'diagram': {
+        const nodes = Array.isArray(s.nodes)
+          ? s.nodes
+              .filter((n: any) => n && n.id != null)
+              .map((n: any) => ({
+                id: String(n.id),
+                label: String(n.label ?? n.id),
+                x: clamp(isFinite(Number(n.x)) ? Number(n.x) : 0.5, 0.05, 0.95),
+                y: clamp(isFinite(Number(n.y)) ? Number(n.y) : 0.5, 0.1, 0.9),
+                color: n.color ? String(n.color) : undefined,
+              }))
+              .slice(0, 10)
+          : [];
+        const ids = new Set(nodes.map((n: any) => n.id));
+        const edges = Array.isArray(s.edges)
+          ? s.edges
+              .filter((e: any) => e && ids.has(String(e.from)) && ids.has(String(e.to)))
+              .map((e: any) => ({
+                from: String(e.from),
+                to: String(e.to),
+                label: e.label ? String(e.label) : undefined,
+              }))
+          : [];
+        return { type: 'diagram', title: s.title ? String(s.title) : undefined, nodes, edges, ...base };
+      }
+      case 'quote':
+        return {
+          type: 'quote',
+          text: String(s.text ?? s.content ?? ''),
+          attribution: s.attribution ? String(s.attribution) : undefined,
+          ...base,
+        };
+      case 'bigstat':
+        return {
+          type: 'bigstat',
+          value: String(s.value ?? '—'),
+          label: String(s.label ?? ''),
+          ...base,
+        };
+      case 'chapter':
+        return {
+          type: 'chapter',
+          number: isFinite(Number(s.number)) ? Number(s.number) : undefined,
+          text: String(s.text ?? s.title ?? 'Chapter'),
+          ...base,
+        };
+      case 'quiz': {
+        const options = Array.isArray(s.options)
+          ? s.options.map((o: any) => String(o)).filter(Boolean).slice(0, 4)
+          : [];
+        return {
+          type: 'quiz',
+          question: String(s.question ?? ''),
+          options,
+          answerIndex: clamp(Number(s.answerIndex) || 0, 0, Math.max(0, options.length - 1)),
+          explanation: s.explanation ? String(s.explanation) : undefined,
+          ...base,
+        };
+      }
       case 'wait':
       default:
         return { type: 'wait', ...base };
@@ -132,6 +227,8 @@ export function normalizeDSL(raw: any): AnimationDSL {
     width: Number(raw.width) || DEFAULTS.width,
     height: Number(raw.height) || DEFAULTS.height,
     backgroundColor: String(raw.backgroundColor || DEFAULTS.backgroundColor),
+    voice: raw.voice ? String(raw.voice) : undefined,
+    captions: raw.captions !== false,
     scenes,
   };
 }
@@ -207,6 +304,55 @@ export function repace(dsl: AnimationDSL): AnimationDSL {
         cursor = panelEnd + SECTION_GAP;
         return { ...s, typingSpeed: speed, startTime: start, duration };
       }
+      case 'diff': {
+        const speed = clamp(s.typingSpeed * 0.6, 5, 8.5);
+        const lines = diffLines(s.before, s.after);
+        const typeDur = typeDuration(addedText(lines), speed);
+        const start = cursor;
+        const duration = diffTypeStart(lines) + typeDur + 0.8;
+        panelStart = start;
+        panelEnd = start + duration;
+        cursor = panelEnd + SECTION_GAP;
+        return { ...s, typingSpeed: speed, startTime: start, duration };
+      }
+      case 'title':
+      case 'chapter':
+      case 'quote':
+      case 'bigstat': {
+        const start = cursor;
+        const duration = Math.max(s.duration, 2.4);
+        panelStart = start;
+        panelEnd = start + duration;
+        cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'bullets': {
+        // each point needs its beat: reveal stagger + reading time
+        const start = cursor;
+        const duration = Math.max(s.duration, 1.4 + s.items.length * 0.9);
+        panelStart = start;
+        panelEnd = start + duration;
+        cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'diagram': {
+        const start = cursor;
+        const duration = Math.max(s.duration, 1.6 + s.nodes.length * 0.45 + s.edges.length * 0.35);
+        panelStart = start;
+        panelEnd = start + duration;
+        cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'quiz': {
+        // export needs time to read the question and reveal the answer; the
+        // interactive player pauses here anyway.
+        const start = cursor;
+        const duration = Math.max(s.duration, 5 + s.options.length * 0.8);
+        panelStart = start;
+        panelEnd = start + duration;
+        cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
       case 'click': {
         const start = cursor;
         const duration = 0.5;
@@ -234,6 +380,46 @@ export function repace(dsl: AnimationDSL): AnimationDSL {
         return s;
     }
   });
+
+  const duration = scenes.reduce((m, s) => Math.max(m, s.startTime + s.duration), 0);
+  return { ...dsl, scenes, duration };
+}
+
+/**
+ * Stretch the timeline so every narrated scene stays on screen at least as long
+ * as its synthesized speech — the sync work a video editor normally exists for.
+ * A scene that grows pushes everything that starts at/after its old end; overlays
+ * that begin inside it keep their place (they still sit within the longer scene).
+ */
+export function paceToNarration(
+  dsl: AnimationDSL,
+  narrationSeconds: Map<number, number>,
+): AnimationDSL {
+  const PAD = 0.45; // breathing room after the voice stops
+
+  const events: { at: number; delta: number }[] = [];
+  const grown = new Map<number, number>();
+  dsl.scenes.forEach((s, i) => {
+    const need = narrationSeconds.get(i);
+    if (!need) return;
+    const newDur = Math.max(s.duration, need + PAD);
+    grown.set(i, newDur);
+    if (newDur > s.duration + 1e-3) {
+      events.push({ at: s.startTime + s.duration, delta: newDur - s.duration });
+    }
+  });
+  if (!events.length && !grown.size) return dsl;
+  events.sort((a, b) => a.at - b.at);
+
+  const shiftAt = (t: number) =>
+    events.reduce((acc, e) => (t >= e.at - 1e-6 ? acc + e.delta : acc), 0);
+
+  const scenes: Scene[] = dsl.scenes.map((s, i) => ({
+    ...s,
+    startTime: s.startTime + shiftAt(s.startTime),
+    duration: grown.get(i) ?? s.duration,
+    narrationDuration: narrationSeconds.get(i),
+  }));
 
   const duration = scenes.reduce((m, s) => Math.max(m, s.startTime + s.duration), 0);
   return { ...dsl, scenes, duration };

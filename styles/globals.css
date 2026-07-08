@@ -3,19 +3,18 @@
 @tailwind utilities;
 
 :root {
-  --bg: #0a0a0c;
-  --bg-2: #0d0d10;
-  --panel: #121217;
-  --panel-2: #17171d;
-  --line: rgba(255, 255, 255, 0.09);
-  --line-strong: rgba(255, 255, 255, 0.17);
-  --fg: #e6e6ea;
-  --dim: #7a7a86;
-  --dimmer: #52525b;
-  --pink: #ff7b9c;
-  --cyan: #22d3ee;
+  --bg: #0a0a0e;
+  --bg-2: #0d0d12;
+  --panel: #111118;
+  --panel-2: #16161e;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --fg: #ecebf2;
+  --dim: #8b8a97;
+  --dimmer: #55545f;
+  --accent: #a78bfa;
+  --accent-deep: #8b5cf6;
   --green: #34d399;
-  --yellow: #fbbf24;
   --mono: "JetBrains Mono", ui-monospace, "Menlo", monospace;
 }
 
@@ -38,16 +37,24 @@ body {
 body {
   min-height: 100vh;
   background-image:
-    radial-gradient(60rem 40rem at 80% -10%, rgba(34, 211, 238, 0.06), transparent 60%),
-    radial-gradient(50rem 40rem at 0% 10%, rgba(255, 123, 156, 0.06), transparent 55%),
-    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
-  background-size: auto, auto, 44px 44px, 44px 44px;
+    radial-gradient(60rem 42rem at 78% -12%, rgba(139, 92, 246, 0.07), transparent 60%),
+    radial-gradient(48rem 38rem at -6% 14%, rgba(56, 89, 235, 0.05), transparent 55%);
+}
+
+/* film grain over everything — the fastest way to kill the "flat AI page" look */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 ::selection {
-  background: var(--pink);
-  color: #14040a;
+  background: var(--accent);
+  color: #17103a;
 }
 
 ::-webkit-scrollbar {
@@ -71,6 +78,6 @@ button {
 }
 
 :focus-visible {
-  outline: 2px solid var(--cyan);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

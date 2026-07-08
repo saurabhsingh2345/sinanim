@@ -20,8 +20,14 @@ const prep = await prepare(dsl);
 const fires: { t: number; type: string }[] = [];
 let cur = 0;
 const mock = {
-  keystroke: () => fires.push({ t: cur, type: 'key' }),
+  keystroke: (_ch?: string) => fires.push({ t: cur, type: 'key' }),
   click: () => fires.push({ t: cur, type: 'click' }),
+  whoosh: () => fires.push({ t: cur, type: 'whoosh' }),
+  pop: () => fires.push({ t: cur, type: 'pop' }),
+  chime: () => fires.push({ t: cur, type: 'chime' }),
+  buzz: () => fires.push({ t: cur, type: 'buzz' }),
+  playNarration: () => {},
+  stopNarration: () => {},
 };
 const cond = new Conductor(mock as any);
 cond.reset(0);
@@ -42,7 +48,8 @@ const nlIndex = code.code.indexOf('\n');
 const pauseStart = sched[nlIndex];
 const pauseEnd = sched[nlIndex + 1];
 console.log(`line-1 pause window: ${pauseStart.toFixed(2)}s .. ${pauseEnd.toFixed(2)}s (should have NO key sounds)`);
-const inPause = keyFires.filter((f) => f.t > pauseStart + 0.02 && f.t < pauseEnd - 0.02);
+// a reveal can land mid-frame, so allow one 30fps frame of slack at the edges
+const inPause = keyFires.filter((f) => f.t > pauseStart + 1 / 30 + 0.01 && f.t < pauseEnd - 0.02);
 console.log('key sounds during pause:', inPause.length, inPause.length === 0 ? 'OK ✓' : 'BAD ✗');
 
 // gaps between consecutive key sounds — machine-gun would be ~0.03s constant

@@ -55,7 +55,10 @@ export function resolveProvider(): Provider {
 export const DEFAULT_MODEL = cfg(resolveProvider()).defaultModel;
 
 // ── Prompt ────────────────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `You are an animation compiler for programming course videos.
+const SYSTEM_PROMPT = `You are a video author for programming tutorials. You write BOTH the
+visuals (an animation timeline) and the voiceover script (narration). The narration is
+synthesized to real speech and the timeline automatically stretches so the voice always fits —
+so write narration generously and do not worry about exact durations.
 Convert the user's request into a strict JSON animation timeline. Return JSON ONLY.
 
 TOP-LEVEL SHAPE:
@@ -65,16 +68,45 @@ TOP-LEVEL SHAPE:
   "width": 1920,
   "height": 1080,
   "backgroundColor": "#0d0d0f",
+  "captions": true,
   "scenes": Scene[]
 }
 
-SCENE TYPES (every scene needs "startTime" and "duration" in seconds):
-- code:     { "type":"code", "language":"python", "code":"...", "typingSpeed":18, "highlightSyntax":true, "cursorVisible":true, "title":"main.py", "startTime":0, "duration":5 }
-- terminal: { "type":"terminal", "output":"...", "prompt":"$ ", "typingSpeed":40, "startTime":6, "duration":3, "sound":true }
-- text:     { "type":"text", "content":"short caption", "position":"bottom", "fadeIn":0.4, "fadeOut":0.4, "startTime":2, "duration":4 }
+NARRATION (the most important part):
+- Almost every scene should have a "narration" string: 1-3 friendly, conversational spoken
+  sentences a human tutor would say over that moment ("Let's start by defining a function...").
+- Narration is plain speech: no code symbols, no markdown, spell things the way you'd SAY them
+  ("dot map", "underscore init underscore").
+- Subtitles are burned in automatically from narration — do NOT duplicate narration as "text" scenes.
+- Use "text" scenes only for short punchy on-screen labels (max ~6 words), position "top-center".
+
+SCENE TYPES (every scene needs "startTime" and "duration" in seconds; all accept "narration"):
+- title:    { "type":"title", "text":"Python f-strings", "subtitle":"a 60-second tutorial", "startTime":0, "duration":3, "narration":"..." }  — full-screen card; open the video with one and close with one.
+- chapter:  { "type":"chapter", "number":1, "text":"Setting up", "startTime":3, "duration":2.5, "narration":"..." }  — section divider card. Use between major sections of longer lessons.
+- bullets:  { "type":"bullets", "title":"What you'll learn", "items":["First point","Second point","Third point"], "startTime":5, "duration":6, "narration":"..." }  — full-screen list, points reveal one by one in sync with the voice. 3-5 short items. Great for intros, recaps, and concept summaries.
+- diagram:  { "type":"diagram", "title":"Request flow", "nodes":[{"id":"a","label":"Client","x":0.2,"y":0.5},{"id":"b","label":"Server","x":0.5,"y":0.5},{"id":"c","label":"DB","x":0.8,"y":0.5}], "edges":[{"from":"a","to":"b","label":"HTTP"},{"from":"b","to":"c"}], "startTime":11, "duration":7, "narration":"..." }  — animated flowchart. Node x/y are fractions (0..1); spread nodes out, 2-6 nodes.
+- quote:    { "type":"quote", "text":"Explicit is better than implicit.", "attribution":"The Zen of Python", "startTime":18, "duration":4, "narration":"..." }  — big centered statement.
+- bigstat:  { "type":"bigstat", "value":"10x", "label":"faster than the naive version", "startTime":22, "duration":3.5, "narration":"..." }  — one huge number that counts up.
+- quiz:     { "type":"quiz", "question":"What does f before a string do?", "options":["Formats it","Freezes it","Makes it faster"], "answerIndex":0, "explanation":"The f prefix enables inline expressions in braces.", "startTime":26, "duration":8, "narration":"Quick check before we move on." }  — interactive checkpoint: the player pauses and waits for the learner's answer. 2-4 options, one clearly correct. Include ONE quiz after each key concept.
+- code:     { "type":"code", "language":"python", "code":"...", "typingSpeed":18, "title":"main.py", "startTime":3, "duration":5, "narration":"..." }
+- diff:     { "type":"diff", "language":"python", "before":"<full old snippet>", "after":"<full new snippet>", "typingSpeed":18, "title":"main.py", "startTime":8, "duration":6, "narration":"..." }  — evolves code on screen: unchanged lines stay, removed lines collapse, new lines are typed. USE THIS whenever you improve/extend code you already showed instead of re-typing the whole file.
+- terminal: { "type":"terminal", "output":"...", "prompt":"$ ", "typingSpeed":40, "startTime":14, "duration":3, "sound":true, "narration":"..." }
+- text:     { "type":"text", "content":"short label", "position":"top-center", "fadeIn":0.4, "fadeOut":0.4, "startTime":2, "duration":4 }
 - click:    { "type":"click", "button":"Run", "startTime":5.5, "duration":0.5, "sound":true }
-- wait:     { "type":"wait", "startTime":5, "duration":1 }
+- wait:     { "type":"wait", "startTime":5, "duration":1, "narration":"..." }  — a beat of pure voiceover.
+- highlight:{ "type":"highlight", "startLine":2, "endLine":3, "startTime":6, "duration":2 }  — tints lines of the current code panel while you talk about them.
 - sprite:   { "type":"sprite", "template":"boy", "x":0.5, "y":0.72, "scale":1, "props":{"color":"#22d3ee"}, "animations":[Keyframe], "startTime":0, "duration":4 }
+
+LESSON STRUCTURE (follow unless the request clearly isn't a tutorial):
+1. "title" card introducing the topic (narrated welcome).
+2. "bullets" card previewing what the lesson covers (2-4 items).
+3. "code" scene typing the first working version (narrated explanation).
+4. Optional "highlight" + "wait" while the narration walks through key lines.
+5. "click" Run, then "terminal" showing real output (narrated).
+6. One or more "diff" scenes evolving the code further, each followed by a run/terminal when it helps.
+7. A "quiz" checkpoint after each key concept (at least one per lesson).
+8. Use "chapter" cards to divide longer lessons into sections; use "diagram" when an architecture or flow is easier shown than told.
+9. Closing "bullets" recap or "title" card (narrated outro).
 
 SPRITE SCENES (for real-world / character animation, NOT code):
 - "template" is one of: boy, ball, cloud, sun, star, ground.
@@ -99,10 +131,12 @@ SPRITE SCENES (for real-world / character animation, NOT code):
 RULES:
 - typingSpeed is CHARACTERS PER SECOND. Use 14-24 for code, 30-50 for terminal.
 - Make code scenes long enough to finish typing: duration >= (code length / typingSpeed) + 1.
+  (Narration may stretch scenes further automatically — that is fine and expected.)
 - Sequence scenes with small gaps. A "click" on Run should come AFTER code finishes and BEFORE terminal output.
-- Keep total video 10-18 seconds. Keep captions short (max ~8 words).
-- Use real, correct, runnable code for the requested language.
-- "backgroundColor" must be "#0d0d0f". fps 30, width 1920, height 1080.
+- Target a 30-60 second tutorial (before narration stretching). Cover the topic properly.
+- Use real, correct, runnable code for the requested language. Terminal output must match what the code actually prints.
+- In "diff" scenes, "before" and "after" are each the COMPLETE snippet, and "before" must exactly equal the code the viewer is currently looking at.
+- "backgroundColor" must be "#0b0b10". fps 30, width 1920, height 1080.
 - Output ONLY the JSON object. No markdown, no commentary.`;
 
 export interface GenerateOptions {
@@ -110,19 +144,33 @@ export interface GenerateOptions {
   signal?: AbortSignal;
 }
 
-export async function generateDSL(
-  prompt: string,
+/** Low-level: one system+user round-trip that must return JSON. Used by the
+ *  lesson pipeline here and by the course-outline API. */
+export async function chatJSON(
+  system: string,
+  user: string,
   opts: GenerateOptions = {},
-): Promise<AnimationDSL> {
+): Promise<string> {
   const provider = resolveProvider();
   const c = cfg(provider);
   const model = opts.model || c.defaultModel;
   const content =
     provider === 'ollama'
-      ? await callOllama(model, prompt, opts.signal)
-      : await callOpenAICompatible(c, model, prompt, opts.signal);
-
+      ? await callOllama(model, system, user, opts.signal)
+      : await callOpenAICompatible(c, model, system, user, opts.signal);
   if (!content) throw new Error(`Empty response from ${c.label}`);
+  return content;
+}
+
+export async function generateDSL(
+  prompt: string,
+  opts: GenerateOptions = {},
+): Promise<AnimationDSL> {
+  const content = await chatJSON(
+    SYSTEM_PROMPT,
+    `Create an animation timeline for: ${prompt}`,
+    opts,
+  );
   return repace(normalizeDSL(JSON.parse(extractJSON(content))));
 }
 
@@ -130,7 +178,8 @@ export async function generateDSL(
 async function callOpenAICompatible(
   c: ProviderCfg,
   model: string,
-  prompt: string,
+  system: string,
+  user: string,
   signal?: AbortSignal,
 ): Promise<string> {
   if (!c.key) {
@@ -150,8 +199,8 @@ async function callOpenAICompatible(
       temperature: 0.4,
       response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `Create an animation timeline for: ${prompt}` },
+        { role: 'system', content: system },
+        { role: 'user', content: user },
       ],
     }),
   });
@@ -166,7 +215,8 @@ async function callOpenAICompatible(
 // ── Ollama (local, native API) ───────────────────────────────────────────────────
 async function callOllama(
   model: string,
-  prompt: string,
+  system: string,
+  user: string,
   signal?: AbortSignal,
 ): Promise<string> {
   const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
@@ -180,8 +230,8 @@ async function callOllama(
       think: false,
       options: { temperature: 0.4, num_ctx: 8192 },
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `Create an animation timeline for: ${prompt}` },
+        { role: 'system', content: system },
+        { role: 'user', content: user },
       ],
     }),
   });

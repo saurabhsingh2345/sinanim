@@ -1,29 +1,41 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
+import Link from 'next/link';
+import { useRouter } from 'next/router';
 import {
   Sparkles,
   Loader2,
   Circle,
-  Copy,
-  Check,
-  Wand2,
-  Film,
-  Code2,
+  GraduationCap,
+  Clapperboard,
   AlertTriangle,
+  Trash2,
+  ArrowRight,
 } from 'lucide-react';
 import { AnimationDSL } from '@/lib/types';
-import { normalizeDSL } from '@/lib/dsl';
-import { Stage } from '@/components/Stage';
+import { CourseOutline } from '@/lib/course';
+import { Player } from '@/components/Player';
+import { createCourse, deleteCourse, getCourse, listCourses, courseCompletion } from '@/lib/store';
 
-const EXAMPLES = [
-  'A Python hello world: type the function, click Run, show the output',
-  'JavaScript array .map() example with the console result',
-  'A React useState counter component being typed out',
-  'Bash: git init, git add, git commit walkthrough',
-  'A SQL SELECT query with a JOIN and its result table',
+const COURSE_EXAMPLES = [
+  'Python for absolute beginners, ending with a small CLI tool',
+  'Practical git: from first commit to fixing mistakes with confidence',
+  'JavaScript async: callbacks → promises → async/await',
+  'SQL from zero: selects, joins and aggregations on a real dataset',
 ];
 
+const VIDEO_EXAMPLES = [
+  'A narrated Python f-strings tutorial: start simple, then evolve the code with format specifiers',
+  'Teach JavaScript array .map(): show a for-loop first, then diff it into .map()',
+  'A React useState counter with voiceover, ending with the functional-update form',
+  'Explain how an HTTP request flows from browser to database, with a diagram',
+];
+
+type Mode = 'course' | 'video';
+
 export default function Home() {
+  const router = useRouter();
+  const [mode, setMode] = useState<Mode>('course');
   const [prompt, setPrompt] = useState('');
   const [dsl, setDsl] = useState<AnimationDSL | null>(null);
   const [loading, setLoading] = useState(false);
@@ -33,9 +45,8 @@ export default function Home() {
   const [online, setOnline] = useState<boolean | null>(null);
   const [providerLabel, setProviderLabel] = useState('');
   const [hint, setHint] = useState('');
-  const [tab, setTab] = useState<'preview' | 'dsl'>('preview');
-  const [editorText, setEditorText] = useState('');
-  const [copied, setCopied] = useState(false);
+  const [courses, setCourses] = useState<CourseOutline[]>([]);
+  const [completion, setCompletion] = useState<Record<string, number>>({});
 
   useEffect(() => {
     fetch('/api/models')
@@ -50,15 +61,35 @@ export default function Home() {
       .catch(() => setOnline(false));
   }, []);
 
-  useEffect(() => {
-    if (dsl) setEditorText(JSON.stringify(dsl, null, 2));
-  }, [dsl]);
+  const refreshShelf = useCallback(() => {
+    const list = listCourses();
+    setCourses(list);
+    const comp: Record<string, number> = {};
+    for (const c of list) {
+      const full = getCourse(c.id);
+      if (full) comp[c.id] = courseCompletion(full);
+    }
+    setCompletion(comp);
+  }, []);
+  useEffect(() => { refreshShelf(); }, [refreshShelf]);
 
   const generate = async () => {
     if (!prompt.trim() || loading) return;
     setLoading(true);
     setError('');
     try {
+      if (mode === 'course') {
+        const res = await fetch('/api/generate-course', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, model }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Course design failed');
+        const stored = createCourse(data.outline);
+        router.push(`/course/${stored.outline.id}`);
+        return; // keep the spinner until navigation
+      }
       const res = await fetch('/api/generate-dsl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -67,28 +98,17 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Generation failed');
       setDsl(data.dsl);
-      setTab('preview');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error');
     } finally {
-      setLoading(false);
+      if (mode !== 'course') setLoading(false);
+      else setLoading(false);
     }
   };
 
-  const applyEditor = () => {
-    try {
-      setDsl(normalizeDSL(JSON.parse(editorText)));
-      setError('');
-      setTab('preview');
-    } catch (e) {
-      setError('Invalid DSL: ' + (e instanceof Error ? e.message : 'parse error'));
-    }
-  };
-
-  const copyDsl = () => {
-    navigator.clipboard.writeText(editorText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1400);
+  const removeCourse = (id: string) => {
+    deleteCourse(id);
+    refreshShelf();
   };
 
   const statusLabel = useMemo(() => {
@@ -97,22 +117,24 @@ export default function Home() {
     return online ? `${name} · online` : `${name} · offline`;
   }, [online, providerLabel]);
 
+  const examples = mode === 'course' ? COURSE_EXAMPLES : VIDEO_EXAMPLES;
+
   return (
     <>
       <Head>
-        <title>MOTION.dsl — prompt → code animation</title>
+        <title>newani — type a topic, get a narrated course</title>
       </Head>
 
       <div className="app">
         <header className="topbar">
           <div className="brand">
-            <span className="glyph">◐</span>
-            <span className="name">MOTION<span className="dot">.dsl</span></span>
-            <span className="tag">open-source code-animation engine</span>
+            <span className="glyph">◆</span>
+            <span className="name">newani</span>
+            <span className="studio">studio</span>
           </div>
           <div className="topright">
             <div className={`status ${online ? 'on' : online === false ? 'off' : ''}`}>
-              <Circle size={9} className="statusdot" fill="currentColor" />
+              <Circle size={8} className="statusdot" fill="currentColor" />
               {statusLabel}
             </div>
             <select
@@ -130,10 +152,26 @@ export default function Home() {
           </div>
         </header>
 
-        <main className="grid">
-          {/* ── Console ─────────────────────────────── */}
-          <section className="console">
-            <label className="lbl"><Wand2 size={14} /> describe the video</label>
+        <main className="hero">
+          <h1>
+            Type a topic.<br />
+            Get a <em>narrated course</em>.
+          </h1>
+          <p className="sub">
+            Scripting, screen-recording, editing and voiceover — replaced by one prompt.
+            Watchable lessons with typed code, quiz checkpoints and a free local voice.
+          </p>
+
+          <div className="modes">
+            <button className={mode === 'course' ? 'mode on' : 'mode'} onClick={() => setMode('course')}>
+              <GraduationCap size={15} /> full course
+            </button>
+            <button className={mode === 'video' ? 'mode on' : 'mode'} onClick={() => setMode('video')}>
+              <Clapperboard size={15} /> single lesson
+            </button>
+          </div>
+
+          <div className="promptbox">
             <textarea
               className="prompt"
               value={prompt}
@@ -141,205 +179,179 @@ export default function Home() {
               onKeyDown={(e) => {
                 if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') generate();
               }}
-              placeholder="e.g. A Python hello world — type the function, click Run, show 'Hello World' in the terminal, caption it."
+              placeholder={
+                mode === 'course'
+                  ? 'What do you want to teach? e.g. "Python decorators for working developers"'
+                  : 'Describe one lesson, e.g. "Teach list comprehensions: loop first, then diff it into a comprehension"'
+              }
               spellCheck={false}
+              rows={3}
             />
-
             <button className="generate" onClick={generate} disabled={loading || !prompt.trim()}>
               {loading ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}
-              {loading ? 'compiling animation…' : 'Generate animation'}
+              {loading
+                ? mode === 'course' ? 'designing curriculum…' : 'writing the lesson…'
+                : mode === 'course' ? 'Build course' : 'Make lesson'}
               <kbd>⌘⏎</kbd>
             </button>
+          </div>
 
-            {online === false && hint && (
-              <div className="warn">
-                <AlertTriangle size={14} />
-                <div>{hint}</div>
-              </div>
-            )}
-            {error && <div className="err">{error}</div>}
+          {online === false && hint && (
+            <div className="warn"><AlertTriangle size={14} /><div>{hint}</div></div>
+          )}
+          {error && <div className="err">{error}</div>}
 
-            <div className="examples">
-              <span className="exlbl">try a prompt</span>
-              {EXAMPLES.map((ex) => (
-                <button key={ex} className="chip" onClick={() => setPrompt(ex)}>
-                  {ex}
-                </button>
+          <div className="examples">
+            {examples.map((ex) => (
+              <button key={ex} className="chip" onClick={() => setPrompt(ex)}>{ex}</button>
+            ))}
+          </div>
+        </main>
+
+        {mode === 'video' && dsl && (
+          <section className="result">
+            <Player dsl={dsl} />
+          </section>
+        )}
+
+        {courses.length > 0 && (
+          <section className="shelf">
+            <h2>your courses</h2>
+            <div className="cards">
+              {courses.map((c) => (
+                <div className="card" key={c.id}>
+                  <Link href={`/course/${c.id}`} className="cardlink">
+                    <span className="cardtitle">{c.title}</span>
+                    <span className="carddesc">{c.description}</span>
+                    <span className="bar"><span className="barfill" style={{ width: `${(completion[c.id] || 0) * 100}%` }} /></span>
+                    <span className="cardmeta">
+                      {c.modules.reduce((a, m) => a + m.lessons.length, 0)} lessons
+                      <ArrowRight size={13} />
+                    </span>
+                  </Link>
+                  <button className="del" onClick={() => removeCourse(c.id)} aria-label="Delete course">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
               ))}
             </div>
-
-            <ol className="steps">
-              <li><b>01</b> local model writes an animation timeline (DSL)</li>
-              <li><b>02</b> the canvas renders it deterministically, with sound</li>
-              <li><b>03</b> export a clean video — no screen recording</li>
-            </ol>
           </section>
+        )}
 
-          {/* ── Stage / DSL ─────────────────────────── */}
-          <section className="workspace">
-            {dsl ? (
-              <>
-                <div className="tabs">
-                  <button className={tab === 'preview' ? 'tab on' : 'tab'} onClick={() => setTab('preview')}>
-                    <Film size={14} /> preview
-                  </button>
-                  <button className={tab === 'dsl' ? 'tab on' : 'tab'} onClick={() => setTab('dsl')}>
-                    <Code2 size={14} /> dsl
-                  </button>
-                  <span className="meta">
-                    {dsl.scenes.length} scenes · {dsl.duration.toFixed(1)}s · {dsl.fps}fps
-                  </span>
-                  <button className="copy" onClick={copyDsl}>
-                    {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? 'copied' : 'copy dsl'}
-                  </button>
-                </div>
-
-                {tab === 'preview' ? (
-                  <Stage dsl={dsl} />
-                ) : (
-                  <div className="editor">
-                    <textarea
-                      value={editorText}
-                      onChange={(e) => setEditorText(e.target.value)}
-                      spellCheck={false}
-                    />
-                    <button className="apply" onClick={applyEditor}>
-                      apply changes → re-render
-                    </button>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="empty">
-                <div className="empty-inner">
-                  <span className="empty-glyph">◐</span>
-                  <p className="empty-title">no animation yet</p>
-                  <p className="empty-sub">
-                    write a prompt and hit generate — your preview renders here,
-                    ready to export.
-                  </p>
-                </div>
-              </div>
-            )}
-          </section>
-        </main>
+        <footer className="foot">
+          <span>voice: Kokoro TTS, synthesized locally · models: {providerLabel || '—'} · everything exports to MP4</span>
+        </footer>
       </div>
 
       <style jsx>{`
-        .app { max-width: 1500px; margin: 0 auto; padding: 22px clamp(16px, 3vw, 40px) 60px; }
-        .topbar {
-          display: flex; align-items: center; justify-content: space-between;
-          gap: 16px; padding-bottom: 20px; margin-bottom: 26px;
-          border-bottom: 1px solid var(--line); flex-wrap: wrap;
+        .app { max-width: 1200px; margin: 0 auto; padding: 22px clamp(16px, 3vw, 40px) 60px; }
+        .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+        .brand { display: flex; align-items: baseline; gap: 9px; }
+        .glyph { color: var(--accent); font-size: 16px; }
+        .name { font-weight: 800; font-size: 19px; letter-spacing: -0.5px; }
+        .studio {
+          font-size: 10.5px; letter-spacing: 2.5px; text-transform: uppercase;
+          color: var(--accent); border: 1px solid rgba(167, 139, 250, 0.35);
+          padding: 3px 8px; border-radius: 999px; transform: translateY(-2px);
         }
-        .brand { display: flex; align-items: baseline; gap: 12px; }
-        .glyph { color: var(--pink); font-size: 22px; transform: translateY(2px); }
-        .name { font-weight: 800; font-size: 20px; letter-spacing: -0.5px; }
-        .dot { color: var(--cyan); }
-        .tag { color: var(--dimmer); font-size: 12px; letter-spacing: 0.2px; }
         .topright { display: flex; align-items: center; gap: 12px; }
         .status {
           display: inline-flex; align-items: center; gap: 7px; font-size: 12px;
-          color: var(--dim); padding: 6px 12px; border: 1px solid var(--line);
-          border-radius: 999px;
+          color: var(--dim); padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px;
         }
         .status .statusdot { color: var(--dimmer); }
         .status.on { color: var(--green); } .status.on .statusdot { color: var(--green); }
-        .status.off { color: var(--pink); } .status.off .statusdot { color: var(--pink); }
+        .status.off { color: #fca5a5; } .status.off .statusdot { color: #fca5a5; }
         .model {
           appearance: none; background: var(--panel); color: var(--fg);
           border: 1px solid var(--line); border-radius: 9px; padding: 7px 12px;
-          font: inherit; font-size: 12px; cursor: pointer;
+          font: inherit; font-size: 12px; cursor: pointer; max-width: 240px;
         }
 
-        .grid { display: grid; grid-template-columns: 400px 1fr; gap: 26px; align-items: start; }
-        @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+        .hero { margin: 72px auto 0; max-width: 760px; text-align: center; }
+        h1 {
+          font-size: clamp(34px, 5.5vw, 54px); line-height: 1.1; letter-spacing: -1.5px;
+          font-weight: 800;
+        }
+        h1 em {
+          font-style: normal; color: var(--accent);
+          text-shadow: 0 0 46px rgba(139, 92, 246, 0.45);
+        }
+        .sub { margin: 20px auto 0; max-width: 560px; color: var(--dim); font-size: 14px; line-height: 1.7; }
 
-        .console { display: flex; flex-direction: column; gap: 14px; }
-        .lbl { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--dim); }
+        .modes { display: inline-flex; gap: 4px; margin-top: 34px; padding: 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+        .mode {
+          display: inline-flex; align-items: center; gap: 8px;
+          padding: 9px 16px; border: none; border-radius: 9px;
+          background: transparent; color: var(--dim); font: inherit; font-size: 13px; cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .mode.on { background: rgba(167, 139, 250, 0.13); color: var(--accent); }
+
+        .promptbox {
+          margin-top: 18px; display: flex; flex-direction: column; gap: 0;
+          border: 1px solid var(--line-strong); border-radius: 16px; overflow: hidden;
+          background: var(--panel);
+          box-shadow: 0 30px 70px -40px rgba(139, 92, 246, 0.35);
+          text-align: left;
+        }
+        .promptbox:focus-within { border-color: rgba(167, 139, 250, 0.55); }
         .prompt {
-          width: 100%; min-height: 150px; resize: vertical; background: var(--panel);
-          color: var(--fg); border: 1px solid var(--line); border-radius: 12px;
-          padding: 16px; font: inherit; font-size: 14px; line-height: 1.6;
+          width: 100%; resize: none; background: transparent; color: var(--fg);
+          border: none; padding: 18px 18px 10px; font: inherit; font-size: 14.5px; line-height: 1.6;
         }
         .prompt::placeholder { color: var(--dimmer); }
-        .prompt:focus { outline: none; border-color: var(--line-strong); }
-
+        .prompt:focus { outline: none; }
         .generate {
           display: inline-flex; align-items: center; gap: 10px; justify-content: center;
-          padding: 14px 18px; border: none; border-radius: 12px; cursor: pointer;
-          font: inherit; font-size: 14px; font-weight: 600; color: #14040a;
-          background: linear-gradient(120deg, var(--pink), #ffb199 60%, var(--cyan));
-          background-size: 160% 100%; transition: background-position .4s ease, filter .2s;
+          margin: 10px; padding: 13px 18px; border: none; border-radius: 11px; cursor: pointer;
+          font: inherit; font-size: 14px; font-weight: 700; color: #16103a;
+          background: linear-gradient(120deg, #c4b5fd, var(--accent) 55%, #8b5cf6);
+          transition: filter 0.15s ease;
         }
-        .generate:hover:not(:disabled) { background-position: 100% 0; }
-        .generate:disabled { opacity: .5; cursor: not-allowed; }
-        .generate kbd {
-          margin-left: 4px; font-size: 11px; background: rgba(0,0,0,0.25);
-          padding: 2px 6px; border-radius: 5px; color: #2a0a12;
-        }
+        .generate:hover:not(:disabled) { filter: brightness(1.07); }
+        .generate:disabled { opacity: 0.45; cursor: not-allowed; }
+        .generate kbd { margin-left: 4px; font-size: 11px; background: rgba(0, 0, 0, 0.22); padding: 2px 6px; border-radius: 5px; }
 
         .warn, .err {
           display: flex; gap: 10px; font-size: 12.5px; line-height: 1.5;
-          padding: 12px 14px; border-radius: 10px;
+          padding: 12px 14px; border-radius: 10px; margin-top: 14px; text-align: left;
         }
-        .warn { color: var(--yellow); border: 1px solid rgba(251,191,36,0.3); background: rgba(251,191,36,0.06); }
-        .warn code { color: var(--fg); background: rgba(255,255,255,0.07); padding: 1px 6px; border-radius: 5px; }
-        .err { color: #fca5a5; border: 1px solid rgba(248,113,113,0.3); background: rgba(248,113,113,0.07); }
+        .warn { color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); background: rgba(251, 191, 36, 0.06); }
+        .err { color: #fca5a5; border: 1px solid rgba(248, 113, 113, 0.3); background: rgba(248, 113, 113, 0.07); }
 
-        .examples { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
-        .exlbl { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--dimmer); }
+        .examples { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 22px; }
         .chip {
-          text-align: left; background: transparent; color: var(--dim);
-          border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px;
-          font: inherit; font-size: 12.5px; cursor: pointer; transition: all .15s;
-        }
-        .chip:hover { color: var(--fg); border-color: var(--cyan); background: rgba(34,211,238,0.05); }
-
-        .steps { list-style: none; margin-top: 8px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 16px; }
-        .steps li { font-size: 12px; color: var(--dim); }
-        .steps b { color: var(--cyan); margin-right: 8px; }
-
-        .workspace { min-width: 0; }
-        .tabs { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
-        .tab {
-          display: inline-flex; align-items: center; gap: 7px; background: transparent;
-          color: var(--dim); border: 1px solid var(--line); border-radius: 9px;
-          padding: 8px 13px; font: inherit; font-size: 12.5px; cursor: pointer;
-        }
-        .tab.on { color: var(--fg); border-color: var(--line-strong); background: var(--panel); }
-        .meta { margin-left: 6px; font-size: 11.5px; color: var(--dimmer); }
-        .copy {
-          margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
           background: transparent; color: var(--dim); border: 1px solid var(--line);
-          border-radius: 9px; padding: 8px 12px; font: inherit; font-size: 12px; cursor: pointer;
+          border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 12px; cursor: pointer;
+          transition: all 0.15s ease;
         }
-        .copy:hover { color: var(--fg); }
+        .chip:hover { color: var(--fg); border-color: rgba(167, 139, 250, 0.5); background: rgba(167, 139, 250, 0.06); }
 
-        .editor { display: flex; flex-direction: column; gap: 12px; }
-        .editor textarea {
-          width: 100%; min-height: 60vh; background: var(--panel); color: #c8d3de;
-          border: 1px solid var(--line); border-radius: 12px; padding: 18px;
-          font: inherit; font-size: 12.5px; line-height: 1.6; resize: vertical; white-space: pre;
-        }
-        .editor textarea:focus { outline: none; border-color: var(--line-strong); }
-        .apply {
-          align-self: flex-start; background: var(--panel); color: var(--green);
-          border: 1px solid rgba(52,211,153,0.4); border-radius: 9px; padding: 10px 16px;
-          font: inherit; font-size: 13px; cursor: pointer;
-        }
-        .apply:hover { background: rgba(52,211,153,0.08); }
+        .result { margin-top: 44px; }
 
-        .empty {
-          border: 1px dashed var(--line-strong); border-radius: 16px;
-          min-height: 62vh; display: grid; place-items: center; text-align: center;
-          background:
-            radial-gradient(30rem 20rem at 50% 30%, rgba(255,123,156,0.05), transparent 70%);
+        .shelf { margin-top: 64px; }
+        .shelf h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 2px; color: var(--dim); margin-bottom: 14px; }
+        .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+        .card {
+          position: relative; border: 1px solid var(--line); border-radius: 14px;
+          background: var(--panel); transition: border-color 0.15s ease, transform 0.15s ease;
         }
-        .empty-glyph { font-size: 56px; color: var(--pink); opacity: 0.5; display: block; margin-bottom: 18px; animation: float 5s ease-in-out infinite; }
-        .empty-title { font-size: 16px; color: var(--fg); }
-        .empty-sub { font-size: 13px; color: var(--dim); max-width: 340px; margin: 10px auto 0; line-height: 1.6; }
-        @keyframes float { 50% { transform: translateY(-10px) rotate(8deg); } }
+        .card:hover { border-color: rgba(167, 139, 250, 0.45); transform: translateY(-2px); }
+        .card :global(.cardlink) { display: flex; flex-direction: column; gap: 8px; padding: 18px; text-decoration: none; color: inherit; }
+        .cardtitle { font-weight: 700; font-size: 14.5px; padding-right: 26px; }
+        .carddesc { font-size: 12px; color: var(--dim); line-height: 1.55; min-height: 34px; }
+        .bar { height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; margin-top: 4px; }
+        .barfill { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+        .cardmeta { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--dimmer); margin-top: 2px; }
+        .del {
+          position: absolute; top: 12px; right: 12px;
+          display: grid; place-items: center; width: 28px; height: 28px;
+          border: none; border-radius: 8px; background: transparent; color: var(--dimmer); cursor: pointer;
+        }
+        .del:hover { color: #fca5a5; background: rgba(248, 113, 113, 0.08); }
+
+        .foot { margin-top: 72px; text-align: center; font-size: 11.5px; color: var(--dimmer); }
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>

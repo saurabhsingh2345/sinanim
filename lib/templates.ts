@@ -219,7 +219,8 @@ export const TEMPLATES: Record<string, Template> = {
         const a = (i / (spikes * 2)) * Math.PI * 2 - Math.PI / 2;
         const x = Math.cos(a) * r;
         const y = Math.sin(a) * r;
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
       }
       ctx.closePath();
       ctx.fill();

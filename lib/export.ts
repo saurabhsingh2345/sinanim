@@ -34,6 +34,7 @@ export async function recordVideo(
   prep: Prepared,
   engine: SoundEngine,
   onProgress?: (ratio: number) => void,
+  narration?: Map<number, AudioBuffer>,
 ): Promise<RecordResult> {
   const ctx = canvas.getContext('2d')!;
   const { dsl } = prep;
@@ -62,6 +63,7 @@ export async function recordVideo(
   });
 
   const conductor = new Conductor(engine);
+  if (narration) conductor.setNarration(narration);
   conductor.reset(0);
   rec.start();
 
