@@ -1,18 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Play, RotateCcw, X } from 'lucide-react';
 import { Tok, tokenizeCode } from '@/lib/highlight';
+import { BitReaction } from './BitReaction';
+import type { MascotAction } from '@/lib/mascot';
 
 // The pause-to-tinker overlay: the code the lesson is showing RIGHT NOW,
 // editable and runnable. JavaScript runs in a sandboxed iframe with console
 // captured; Python runs on Pyodide (loaded once from CDN, ~cached forever).
-// This is the moment the "video" stops being a video.
+// This is the moment the "video" stops being a video — and Bit reacts to the
+// learner's OWN code every time they run it (LEAP 2).
 
 interface PlaygroundProps {
   code: string;
   language: string;
   title?: string;
+  /** What the lesson is teaching — gives Bit's reactions context. */
+  concept?: string;
   onClose: () => void;
 }
+
+interface Reaction { message: string; action: MascotAction; tone: 'praise' | 'nudge' | 'fix'; }
 
 const RUNNABLE = new Set(['javascript', 'js', 'jsx', 'typescript', 'ts', 'python', 'py']);
 
@@ -101,12 +108,14 @@ async function runPython(code: string, onStatus: (s: string) => void): Promise<s
 }
 
 // ── Component ───────────────────────────────────────────────────────────────────
-export function Playground({ code: initial, language, title, onClose }: PlaygroundProps) {
+export function Playground({ code: initial, language, title, concept, onClose }: PlaygroundProps) {
   const [code, setCode] = useState(initial);
   const [out, setOut] = useState<string[] | null>(null);
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState('');
   const [toks, setToks] = useState<Tok[][]>([]);
+  const [reaction, setReaction] = useState<Reaction | null>(null);
+  const [reacting, setReacting] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
 
@@ -128,20 +137,44 @@ export function Playground({ code: initial, language, title, onClose }: Playgrou
     }
   }, []);
 
+  // Bit reacts to what the learner just ran (their code + real output)
+  const reactToRun = useCallback(async (outputText: string) => {
+    setReacting(true);
+    setReaction(null);
+    try {
+      const res = await fetch('/api/react', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ concept: concept || title, starterCode: initial, learnerCode: code, output: outputText, language }),
+      });
+      const data = await res.json();
+      if (data && data.message) setReaction({ message: data.message, action: data.action, tone: data.tone });
+    } catch {
+      // silent — a missing reaction shouldn't disrupt tinkering
+    } finally {
+      setReacting(false);
+    }
+  }, [concept, title, initial, code, language]);
+
   const run = useCallback(async () => {
     if (running || !canRun) return;
     setRunning(true);
     setOut(null);
+    setReaction(null);
     try {
       const lines = isPython(lang) ? await runPython(code, setStatus) : await runJS(code);
-      setOut(lines.length ? lines : ['(no output)']);
+      const shown = lines.length ? lines : ['(no output)'];
+      setOut(shown);
+      reactToRun(shown.join('\n'));
     } catch (e) {
-      setOut(['✕ ' + (e instanceof Error ? e.message : 'run failed')]);
+      const msg = '✕ ' + (e instanceof Error ? e.message : 'run failed');
+      setOut([msg]);
+      reactToRun(msg);
     } finally {
       setRunning(false);
       setStatus('');
     }
-  }, [code, lang, canRun, running]);
+  }, [code, lang, canRun, running, reactToRun]);
 
   // cmd/ctrl+enter runs, esc closes
   useEffect(() => {
@@ -220,6 +253,18 @@ export function Playground({ code: initial, language, title, onClose }: Playgrou
         </div>
       </div>
 
+      {(reacting || reaction) && (
+        <div className="reaction">
+          <BitReaction
+            action={reaction?.action || 'think'}
+            tone={reaction?.tone || 'nudge'}
+            message={reaction?.message || ''}
+            loading={reacting && !reaction}
+            onDismiss={() => setReaction(null)}
+          />
+        </div>
+      )}
+
       <style jsx>{`
         .pg {
           position: absolute; inset: 0; z-index: 30;
@@ -293,9 +338,15 @@ export function Playground({ code: initial, language, title, onClose }: Playgrou
         :global(.spin) { animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        .reaction {
+          position: absolute; left: 18px; bottom: 18px; z-index: 20;
+          pointer-events: none;
+        }
+
         @media (max-width: 860px) {
           .body { grid-template-columns: 1fr; grid-template-rows: 1.5fr 1fr; }
           .editor { border-right: none; border-bottom: 1px solid var(--line); }
+          .reaction { left: 10px; bottom: 10px; }
         }
       `}</style>
     </div>

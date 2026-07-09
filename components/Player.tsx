@@ -16,8 +16,10 @@ import {
   FlaskConical,
   CheckCircle2,
 } from 'lucide-react';
-import { AnimationDSL, QuizScene } from '@/lib/types';
+import { AnimationDSL, ChallengeScene, QuizScene } from '@/lib/types';
 import { Playground } from './Playground';
+import { ChallengeCard } from './ChallengeCard';
+import { recordResult, recordReview } from '@/lib/mastery';
 import { Prepared, prepare, renderFrame, RenderUI } from '@/lib/renderer';
 import { SoundEngine } from '@/lib/sounds';
 import { Conductor } from '@/lib/conductor';
@@ -30,7 +32,7 @@ import { Transcript } from './Transcript';
 
 // ── Chapters (seekbar segments) ────────────────────────────────────────────────
 const SECTION_TYPES = new Set([
-  'title', 'chapter', 'code', 'diff', 'terminal', 'bullets', 'diagram', 'quote', 'bigstat', 'quiz',
+  'title', 'chapter', 'code', 'diff', 'terminal', 'bullets', 'diagram', 'quote', 'bigstat', 'quiz', 'challenge', 'viz',
 ]);
 
 interface Chapter { start: number; end: number; label: string; kind: string; }
@@ -47,6 +49,8 @@ function chapterLabel(s: AnimationDSL['scenes'][number]): string {
     case 'quote': return 'worth remembering';
     case 'bigstat': return s.label || 'the numbers';
     case 'quiz': return 'checkpoint';
+    case 'challenge': return 'your turn';
+    case 'viz': return s.title || 'visualized';
     default: return s.type;
   }
 }
@@ -116,6 +120,8 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
   const [showSettings, setShowSettings] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [quiz, setQuiz] = useState<{ idx: number; selected: number | null; correct: boolean | null } | null>(null);
+  const [challenge, setChallenge] = useState<{ idx: number } | null>(null);
+  const solvedRef = useRef<Set<number>>(new Set());
   const [playground, setPlayground] = useState<{ code: string; language: string; title?: string } | null>(null);
   const [score, setScore] = useState({ correct: 0, total: 0 });
 
@@ -139,7 +145,8 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
     const prep = prepRef.current;
     if (!canvas || !prep) return;
     const ctx = canvas.getContext('2d');
-    if (ctx) renderFrame(ctx, prep, t, quizUiRef.current);
+    // interactive:true → quizzes wait for an answer and never auto-reveal
+    if (ctx) renderFrame(ctx, prep, t, { ...(quizUiRef.current ?? {}), interactive: true });
   }, []);
 
   // ── Pipeline: synthesize narration, pace, tokenize ──
@@ -149,10 +156,12 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
     playingRef.current = false;
     setPlaying(false);
     setQuiz(null);
+    setChallenge(null);
     setPlayground(null);
     setScore({ correct: 0, total: 0 });
     quizUiRef.current = undefined;
     answeredRef.current.clear();
+    solvedRef.current.clear();
     engineRef.current?.stopNarration();
     (async () => {
       try {
@@ -224,18 +233,21 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
       const prevT = timeRef.current;
       let t = prevT + dt;
 
-      // interactive checkpoint: stop the clock once the options are on screen
+      // interactive checkpoints: stop the clock at a quiz (options on screen) or
+      // a challenge (once the card is in) and wait for the learner.
       let pausedForQuiz = -1;
+      let pausedForChallenge = -1;
       prep.dsl.scenes.forEach((s, i) => {
-        if (s.type !== 'quiz' || answeredRef.current.has(i)) return;
-        const at = quizPauseAt(s as QuizScene);
-        if (prevT < at && t >= at) {
-          t = Math.min(t, at);
-          pausedForQuiz = i;
+        if (s.type === 'quiz' && !answeredRef.current.has(i)) {
+          const at = quizPauseAt(s as QuizScene);
+          if (prevT < at && t >= at) { t = Math.min(t, at); pausedForQuiz = i; }
+        } else if (s.type === 'challenge' && !solvedRef.current.has(i)) {
+          const at = s.startTime + 0.6;
+          if (prevT < at && t >= at) { t = Math.min(t, at); pausedForChallenge = i; }
         }
       });
 
-      const ended = t >= total && pausedForQuiz < 0;
+      const ended = t >= total && pausedForQuiz < 0 && pausedForChallenge < 0;
       if (ended) t = total;
 
       timeRef.current = t;
@@ -246,6 +258,14 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
       if (pausedForQuiz >= 0) {
         quizUiRef.current = { quiz: { selected: null, correct: null } };
         setQuiz({ idx: pausedForQuiz, selected: null, correct: null });
+        playingRef.current = false;
+        setPlaying(false);
+        engineRef.current?.stopNarration();
+        draw(t);
+        return;
+      }
+      if (pausedForChallenge >= 0) {
+        setChallenge({ idx: pausedForChallenge });
         playingRef.current = false;
         setPlaying(false);
         engineRef.current?.stopNarration();
@@ -290,8 +310,10 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
       // seeking back before a checkpoint re-arms it
       prepRef.current?.dsl.scenes.forEach((s, i) => {
         if (s.type === 'quiz' && clamped < quizPauseAt(s as QuizScene)) answeredRef.current.delete(i);
+        if (s.type === 'challenge' && clamped < s.startTime + 0.6) solvedRef.current.delete(i);
       });
       setQuiz(null);
+      setChallenge(null);
       quizUiRef.current = undefined;
       timeRef.current = clamped;
       setTime(clamped);
@@ -320,13 +342,45 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
       quizUiRef.current = { quiz: { selected: choice, correct } };
       setQuiz({ ...quiz, selected: choice, correct });
       setScore((s) => ({ correct: s.correct + (correct ? 1 : 0), total: s.total + 1 }));
+      // feed the persistent learner model (FSRS): this concept was recalled or not
+      recordResult(dsl.title, correct);
       if (correct) engineRef.current?.chime();
       else engineRef.current?.buzz();
       onQuizResult?.(correct);
       draw(timeRef.current);
     },
-    [quiz, draw, onQuizResult],
+    [quiz, draw, onQuizResult, dsl.title],
   );
+
+  // ── Challenge solving ──
+  const advancePast = useCallback((idx: number) => {
+    const scene = prepRef.current?.dsl.scenes[idx];
+    if (scene) timeRef.current = Math.max(timeRef.current, scene.startTime + scene.duration - 0.2);
+    play();
+  }, [play]);
+
+  const passChallenge = useCallback((firstTry: boolean) => {
+    if (!challenge) return;
+    solvedRef.current.add(challenge.idx);
+    const scene = prepRef.current?.dsl.scenes[challenge.idx] as ChallengeScene | undefined;
+    recordReview(scene?.concept || dsl.title, firstTry ? 4 : 3); // easy vs good
+    setScore((s) => ({ correct: s.correct + 1, total: s.total + 1 }));
+    engineRef.current?.chime();
+    const idx = challenge.idx;
+    setChallenge(null);
+    advancePast(idx);
+  }, [challenge, advancePast, dsl.title]);
+
+  const skipChallenge = useCallback(() => {
+    if (!challenge) return;
+    solvedRef.current.add(challenge.idx);
+    const scene = prepRef.current?.dsl.scenes[challenge.idx] as ChallengeScene | undefined;
+    recordReview(scene?.concept || dsl.title, 1); // skipped → needs review soon
+    setScore((s) => ({ correct: s.correct, total: s.total + 1 }));
+    const idx = challenge.idx;
+    setChallenge(null);
+    advancePast(idx);
+  }, [challenge, advancePast, dsl.title]);
 
   // while a checkpoint holds the timeline, the mascot still needs to act —
   // drive overlay animation from the wall clock via ui.uiTime
@@ -535,6 +589,7 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
 
   const atEnd = time >= adsl.duration - 1e-3;
   const quizScene = quiz ? (adsl.scenes[quiz.idx] as QuizScene) : null;
+  const challengeScene = challenge ? (adsl.scenes[challenge.idx] as ChallengeScene) : null;
 
   const ttsLabel =
     tts.phase === 'download'
@@ -600,7 +655,17 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
             code={playground.code}
             language={playground.language}
             title={playground.title}
+            concept={adsl.title}
             onClose={() => setPlayground(null)}
+          />
+        )}
+
+        {challengeScene && !playground && (
+          <ChallengeCard
+            key={challenge!.idx}
+            scene={challengeScene}
+            onPass={passChallenge}
+            onSkip={skipChallenge}
           />
         )}
 

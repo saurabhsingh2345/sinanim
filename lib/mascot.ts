@@ -20,8 +20,12 @@ export interface MascotOpts {
   /** 1 ≈ 175px tall. */
   scale: number;
   action: MascotAction;
-  /** Seconds since this appearance began. */
+  /** Action clock: seconds since the CURRENT pose/action began (drives pose). */
   local: number;
+  /** Presence clock: seconds Bit has been on screen (drives the enter pop). When
+   *  omitted, falls back to `local`. Keep large for a persistent, stable Bit so
+   *  changing actions never re-triggers the entrance pop. */
+  enterLocal?: number;
   /** Total lifetime in seconds (drives the exit); Infinity = stays. */
   life: number;
   /** A pixel point to look at / point at (frame coords). */
@@ -66,11 +70,12 @@ export function mascotPresence(local: number, life: number): number {
 }
 
 export function drawMascot(ctx: CanvasRenderingContext2D, o: MascotOpts) {
-  const presence = mascotPresence(o.local, o.life);
+  const el = o.enterLocal ?? o.local; // presence clock (independent of action)
+  const presence = mascotPresence(el, o.life);
   if (presence <= 0) return;
-  const enterPop = springOut(clamp(o.local / 0.4, 0, 1));
-  const exitEase = isFinite(o.life) ? easeInOut(clamp((o.life - o.local) / 0.35, 0, 1)) : 1;
-  const t = o.local;
+  const enterPop = springOut(clamp(el / 0.4, 0, 1));
+  const exitEase = isFinite(o.life) ? easeInOut(clamp((o.life - el) / 0.35, 0, 1)) : 1;
+  const t = o.local; // action/pose clock
 
   // ── hover + action-level body motion ──
   let bob = Math.sin(t * 2.3) * 5;

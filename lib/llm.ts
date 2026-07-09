@@ -107,9 +107,11 @@ SCENE TYPES (every scene needs "startTime" and "duration" in seconds; all accept
 - chapter:  { "type":"chapter", "number":1, "text":"Setting up", "startTime":3, "duration":2.5, "narration":"..." }  — section divider card. Use between major sections of longer lessons.
 - bullets:  { "type":"bullets", "title":"What you'll learn", "items":["First point","Second point","Third point"], "startTime":5, "duration":6, "narration":"..." }  — full-screen list, points reveal one by one in sync with the voice. 3-5 short items. Great for intros, recaps, and concept summaries.
 - diagram:  { "type":"diagram", "title":"Request flow", "nodes":[{"id":"a","label":"Client","x":0.2,"y":0.5},{"id":"b","label":"Server","x":0.5,"y":0.5},{"id":"c","label":"DB","x":0.8,"y":0.5}], "edges":[{"from":"a","to":"b","label":"HTTP"},{"from":"b","to":"c"}], "startTime":11, "duration":7, "narration":"..." }  — animated flowchart. Node x/y are fractions (0..1); spread nodes out, 2-6 nodes.
+- viz:      { "type":"viz", "title":"Bubble sort", "vizKind":"array", "steps":[ {"caption":"Compare the first two","array":["5","2","8","1"],"compare":[0,1],"pointers":[{"name":"i","index":0}]}, {"caption":"Swap them","array":["2","5","8","1"],"done":[]}, ... ], "startTime":20, "duration":12, "narration":"..." }  — ANIMATE THE IDEA behind an algorithm, not the code. Each step carries the FULL state; the engine tweens between steps (values pop, pointers glide, stack frames push and pop). Per step you may set: "array" (cell values), "highlight"/"compare"/"done" (index arrays), "pointers" ([{name,index}] labelled arrows that walk the array), "vars" ({name:value} boxes that update, e.g. an accumulator), "stack" (bottom→top frames, for recursion/call stack). 3-8 steps. USE THIS for sorting, searching, two-pointer, loops building a value, and recursion — it makes abstract steps visible. Keep the array ≤ 10 cells. The narration should walk through the steps.
 - quote:    { "type":"quote", "text":"Explicit is better than implicit.", "attribution":"The Zen of Python", "startTime":18, "duration":4, "narration":"..." }  — big centered statement.
 - bigstat:  { "type":"bigstat", "value":"10x", "label":"faster than the naive version", "startTime":22, "duration":3.5, "narration":"..." }  — one huge number that counts up.
 - quiz:     { "type":"quiz", "question":"What does f before a string do?", "options":["Formats it","Freezes it","Makes it faster"], "answerIndex":0, "explanation":"The f prefix enables inline expressions in braces.", "startTime":26, "duration":8, "narration":"Quick check before we move on." }  — interactive checkpoint: the player pauses and waits for the learner's answer. 2-4 options; distractors must be PLAUSIBLE mistakes a real learner makes; the explanation must teach, not just confirm. Include ONE quiz after each key concept.
+- challenge: { "type":"challenge", "language":"python", "prompt":"Write a function is_even(n) that returns True for even numbers.", "starterCode":"def is_even(n):\n    # your code here\n    pass", "solution":"def is_even(n):\n    return n % 2 == 0", "tests":[{"expression":"is_even(4)","expected":"True"},{"expression":"is_even(7)","expected":"False"}], "hint":"The modulo operator % gives a remainder.", "concept":"modulo / even numbers", "startTime":30, "duration":12, "narration":"Now it's your turn — give this a real go." }  — a REAL coding challenge (Python or JavaScript only): the player pauses, the learner WRITES code, and it is executed against the tests. Each test's "expression" is evaluated right after the learner's code and its printed value is compared to "expected". Rules: 2-4 tests; "expected" must be EXACTLY what printing that expression produces (e.g. Python True/False, a list like [1, 4, 9]); "starterCode" is a clear scaffold with the signature and a TODO; "solution" must actually pass every test. Include AT MOST ONE challenge, near the end, for a hands-on concept.
 - code:     { "type":"code", "language":"python", "code":"...", "title":"main.py", "startTime":3, "duration":5, "narration":"..." }  — the code lands with an animated line cascade (fast and calm, never typed out character by character), then holds while you narrate through it.
 - diff:     { "type":"diff", "language":"python", "before":"<full old snippet>", "after":"<full new snippet>", "title":"main.py", "startTime":8, "duration":6, "narration":"..." }  — MAGIC-MOVE morph: unchanged code slides into place, removed lines fade out, new lines land one by one. This is the signature visual — USE IT for every evolution of code you already showed. Never re-show a whole file as a new "code" scene.
 - terminal: { "type":"terminal", "output":"...", "prompt":"$ ", "typingSpeed":40, "startTime":14, "duration":3, "sound":true, "narration":"..." }
@@ -127,8 +129,8 @@ LESSON STRUCTURE (follow unless the request clearly isn't a tutorial):
 4. "highlight" + "mascot" point + "wait" while the narration walks through the key lines.
 5. "click" Run, then "terminal" showing real output (narrated). Mascot "celebrate" or "shocked" as fits.
 6. One or more "diff" scenes evolving the code, each narrating WHY, followed by a run/terminal when it helps.
-7. A "quiz" checkpoint after each key concept (at least one per lesson).
-8. Use "chapter" cards to divide longer lessons into sections; use "diagram" when an architecture or flow is easier shown than told.
+7. A "quiz" checkpoint after each key concept (at least one per lesson). For a hands-on coding lesson (Python/JS), optionally ONE "challenge" near the end where the learner writes a small function that's tested for real.
+8. Use "chapter" cards to divide longer lessons into sections; use "diagram" when an architecture or flow is easier shown than told. When the lesson is about an ALGORITHM or DATA STRUCTURE (sorting, searching, loops that build a value, recursion), include a "viz" scene that animates the steps — it teaches the idea far better than the code alone.
 9. Closing "bullets" recap (what was learned + the why) or "title" outro card.
 
 SPRITE SCENES (for real-world / character animation, NOT code):
@@ -156,6 +158,7 @@ RULES:
 - Sequence scenes with small gaps. A "click" on Run should come AFTER a code/diff scene and BEFORE terminal output.
 - Target 60-120 seconds of content (10-18 scenes). Cover the topic PROPERLY — depth beats brevity.
 - Use real, correct, runnable code for the requested language. Terminal output must match what the code actually prints, character for character.
+- SELF-CONTAINED: any "code" or "diff" scene that is followed by a "terminal" must be a COMPLETE program that runs on its own — define everything it uses AND include the call/print that produces the shown output. Never show a fragment (a call without its definition) right before a terminal; the code on screen must actually produce that terminal output when run.
 - Keep snippets ≤ 16 lines so they fit the panel; evolve them with diffs instead of growing one giant file.
 - In "diff" scenes, "before" and "after" are each the COMPLETE snippet, and "before" must exactly equal the code the viewer is currently looking at.
 - "backgroundColor" must be "#0b0b10". fps 30, width 1920, height 1080.
@@ -170,7 +173,9 @@ JSON you are reviewing. Return the FULL improved JSON in the exact same schema �
 
 REVIEW CHECKLIST, in priority order:
 1. CODE CORRECTNESS: every snippet must be real, runnable and idiomatic. Fix bugs. Every
-   "terminal" output must be exactly what the preceding code prints.
+   "terminal" output must be exactly what the preceding code prints. Any code/diff scene
+   before a terminal must be SELF-CONTAINED (defines everything it uses + the printing call),
+   so it runs on its own and actually produces that output — never a fragment.
 2. DIFF INTEGRITY: every "diff".before must EXACTLY equal the code currently on screen (the
    previous "code".code or "diff".after). Repair the chain if broken.
 3. COMPLETENESS: the lesson must (a) open with a concrete motivation, (b) contain one
@@ -291,6 +296,14 @@ export async function generateDSL(
         'a closing "bullets" recap scene connecting what was learned back to the opening problem',
       );
     }
+    // algorithm / data-structure topics teach far better when the steps are
+    // animated — guarantee a viz scene for them (the model often forgets).
+    const algoRe = /\b(sort|search|recursi\w*|stack|queue|tree|linked list|binary|traver\w*|iterat\w*|\bloop\b|pointer|hash\w*|fibonacci|factorial|bfs|dfs|graph|algorithm|big o|complexity|two pointer|sliding window)\b/i;
+    if (algoRe.test(prompt) && !dsl.scenes.some((s) => s.type === 'viz')) {
+      missing.push(
+        'a "viz" scene that ANIMATES this algorithm step by step — 4-7 steps, each a full state with a caption, using array cells with highlight/compare/done indices, walking pointers ([{name,index}]), an accumulator in vars, and/or a call stack for recursion',
+      );
+    }
     if (missing.length) {
       try {
         const repaired = await chatJSON(
@@ -324,6 +337,22 @@ export async function generateDSL(
       }
     } catch {
       // narration stays as-is
+    }
+  }
+
+  // LEAP 1 — execution grounding: actually run every snippet and replace terminal
+  // output with the real thing. Server-side; dynamically imported so the Node-only
+  // runner never enters the client bundle. Never let it break generation.
+  if (process.env.LLM_GROUND !== '0' && typeof window === 'undefined') {
+    try {
+      const { groundDSL } = await import('./runner');
+      const res = await groundDSL(dsl);
+      dsl = res.dsl;
+      if (res.grounded || res.failures) {
+        console.log(`[ground] ${res.grounded} terminal(s) verified, ${res.failures} showed real errors`);
+      }
+    } catch {
+      // grounding unavailable (no runtime) — ship the model's output as-is
     }
   }
   return repace(dsl);

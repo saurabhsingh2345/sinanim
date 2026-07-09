@@ -193,6 +193,71 @@ export interface QuizScene extends BaseScene {
   explanation?: string;
 }
 
+/** One graded check: evaluate `expression` against the learner's code and
+ *  compare its printed result to `expected` (both trimmed). */
+export interface ChallengeTest {
+  expression: string;
+  expected: string;
+}
+
+/** A real coding challenge (LEAP 3). The player pauses, the learner writes code
+ *  in an editor, and it's RUN against `tests`. Progression reflects mastery.
+ *  Export renders it as a "try this" card with the solution revealed. */
+export interface ChallengeScene extends BaseScene {
+  type: 'challenge';
+  language: string;
+  /** What to build, in one or two sentences. */
+  prompt: string;
+  /** Scaffold the learner starts from (a signature + TODO). */
+  starterCode: string;
+  /** A correct solution (used for export reveal and as a fallback). */
+  solution: string;
+  tests: ChallengeTest[];
+  hint?: string;
+  /** Short concept tag for the learner model, e.g. "list comprehensions". */
+  concept?: string;
+}
+
+// ── Concept visualization (LEAP 4) ──────────────────────────────────────────────
+// Animate the IDEA behind the code — an array being sorted, a pointer walking, the
+// call stack growing, a variable accumulating. One general step-based model covers
+// most intro-CS concepts. Each step carries the FULL state (not deltas); the
+// renderer tweens between consecutive steps (values pop, pointers glide, stack
+// frames push/pop).
+export interface VizPointer {
+  /** Label shown on the pointer, e.g. "i", "left", "head". */
+  name: string;
+  /** Which array index it points at. */
+  index: number;
+}
+
+export interface VizStep {
+  /** One short line describing this step (shown on screen, synced to narration). */
+  caption?: string;
+  /** Full array state at this step (cell values as strings). */
+  array?: string[];
+  /** Indices to highlight (accent). */
+  highlight?: number[];
+  /** Two indices being compared (amber). */
+  compare?: [number, number];
+  /** Indices considered done/sorted (green). */
+  done?: number[];
+  /** Labeled pointers onto array cells. */
+  pointers?: VizPointer[];
+  /** Named variables to show as boxes, e.g. { sum: "6", i: "2" }. */
+  vars?: Record<string, string>;
+  /** Full call/DS stack, bottom → top. */
+  stack?: string[];
+}
+
+export interface VizScene extends BaseScene {
+  type: 'viz';
+  title?: string;
+  /** Primary focus, a layout hint. */
+  vizKind?: 'array' | 'stack' | 'vars';
+  steps: VizStep[];
+}
+
 export type Scene =
   | CodeScene
   | TerminalScene
@@ -209,7 +274,9 @@ export type Scene =
   | BigStatScene
   | ChapterScene
   | MascotScene
-  | QuizScene;
+  | QuizScene
+  | ChallengeScene
+  | VizScene;
 
 export interface AnimationDSL {
   title: string;

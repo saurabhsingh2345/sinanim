@@ -16,6 +16,7 @@ import { AnimationDSL } from '@/lib/types';
 import { CourseOutline } from '@/lib/course';
 import { Player } from '@/components/Player';
 import { createCourse, deleteCourse, getCourse, listCourses, courseCompletion } from '@/lib/store';
+import { allCards, dueConcepts, masteryOf } from '@/lib/mastery';
 
 const COURSE_EXAMPLES = [
   'Python for absolute beginners, ending with a small CLI tool',
@@ -73,6 +74,18 @@ export default function Home() {
     setCompletion(comp);
   }, []);
   useEffect(() => { refreshShelf(); }, [refreshShelf]);
+
+  // learner model: concepts the FSRS model says are worth revisiting
+  const [review, setReview] = useState<{ concept: string; mastery: number }[]>([]);
+  useEffect(() => {
+    const due = new Set(dueConcepts().map((c) => c.concept));
+    const items = allCards()
+      .map((c) => ({ concept: c.concept, mastery: masteryOf(c.concept), due: due.has(c.concept) }))
+      .filter((c) => c.due || c.mastery < 0.65)
+      .sort((a, b) => a.mastery - b.mastery)
+      .slice(0, 8);
+    setReview(items);
+  }, []);
 
   // authoring is a multi-pass pipeline (~20-30s); rotate the label so the wait
   // clearly progresses instead of looking frozen
@@ -227,6 +240,22 @@ export default function Home() {
           </section>
         )}
 
+        {review.length > 0 && (
+          <section className="review">
+            <h2>worth revisiting</h2>
+            <p className="rsub">Your progress is remembered across every lesson. These concepts have faded — generate a lesson to strengthen them.</p>
+            <div className="rchips">
+              {review.map((r) => (
+                <button key={r.concept} className="rchip" onClick={() => { setMode('video'); setPrompt(`A focused refresher on ${r.concept}, with a hands-on challenge.`); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
+                  <span className="rdot" style={{ background: `hsl(${r.mastery * 120}, 70%, 55%)` }} />
+                  {r.concept}
+                  <em>{Math.round(r.mastery * 100)}%</em>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
         {courses.length > 0 && (
           <section className="shelf">
             <h2>your courses</h2>
@@ -342,6 +371,21 @@ export default function Home() {
         .chip:hover { color: var(--fg); border-color: rgba(167, 139, 250, 0.5); background: rgba(167, 139, 250, 0.06); }
 
         .result { margin-top: 44px; }
+
+        .review { margin-top: 56px; }
+        .review h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 2px; color: var(--dim); margin-bottom: 8px; }
+        .rsub { font-size: 12.5px; color: var(--dimmer); margin-bottom: 14px; max-width: 640px; line-height: 1.5; }
+        .rchips { display: flex; flex-wrap: wrap; gap: 8px; }
+        .rchip {
+          display: inline-flex; align-items: center; gap: 8px;
+          padding: 8px 12px; border-radius: 999px; cursor: pointer;
+          border: 1px solid var(--line-strong); background: rgba(255,255,255,0.02);
+          color: var(--fg); font: inherit; font-size: 12.5px;
+          transition: border-color 0.12s ease, background 0.12s ease;
+        }
+        .rchip:hover { border-color: var(--accent); background: rgba(167,139,250,0.08); }
+        .rdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+        .rchip em { font-style: normal; color: var(--dimmer); font-variant-numeric: tabular-nums; }
 
         .shelf { margin-top: 64px; }
         .shelf h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 2px; color: var(--dim); margin-bottom: 14px; }

@@ -2,6 +2,7 @@ import {
   AnimationDSL,
   BigStatScene,
   BulletsScene,
+  ChallengeScene,
   ChapterScene,
   CodeScene,
   DiagramScene,
@@ -14,6 +15,8 @@ import {
   TerminalScene,
   TextScene,
   TitleScene,
+  VizScene,
+  VizStep,
 } from './types';
 import { tokenizeCode } from './highlight';
 import { TEMPLATES, SpriteState } from './templates';
@@ -37,6 +40,9 @@ export interface Prepared {
 
 /** Live UI state the interactive player feeds in (never set during export). */
 export interface RenderUI {
+  /** True in the live player: quizzes wait for an answer and NEVER auto-reveal
+   *  on a timer (that timed reveal is export-only). */
+  interactive?: boolean;
   quiz?: {
     /** Option the learner picked, or null while waiting. */
     selected: number | null;
@@ -136,7 +142,7 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: number): st
 }
 
 // ── Scene selection ───────────────────────────────────────────────────────────
-const CARD_TYPES = new Set(['title', 'chapter', 'bullets', 'diagram', 'quote', 'bigstat', 'quiz']);
+const CARD_TYPES = new Set(['title', 'chapter', 'bullets', 'diagram', 'quote', 'bigstat', 'quiz', 'challenge', 'viz']);
 
 function lastStartedIndex(dsl: AnimationDSL, type: string, time: number): number {
   let best = -1, bestStart = -1;
@@ -206,12 +212,14 @@ function layoutPanels(prep: Prepared, time: number): PanelSlot[] {
   });
 }
 
-/** Frame rect of a highlight band inside the code panel (for drawing + camera). */
+/** Frame rect of a highlight band inside the code panel (for drawing + camera).
+ *  Must match the morph panel's row geometry exactly: text baseline for row r is
+ *  at (bodyY + fs) + r*lh, so the line's box top is bodyY + r*lh. */
 function highlightRect(scene: { startLine: number; endLine: number }, codeRect: Rect, code: CodeScene, dsl: AnimationDSL): Rect {
   const fs = codeFont(code, dsl);
   const lh = lineH(fs);
   const bodyY = codeRect.y + TITLE_H + PAD;
-  const y = bodyY + (scene.startLine - 1) * lh - fs;
+  const y = bodyY + (scene.startLine - 1) * lh;
   const h = (scene.endLine - scene.startLine + 1) * lh;
   return { x: codeRect.x + 6, y, w: codeRect.w - 12, h };
 }
@@ -339,6 +347,8 @@ function drawWorld(
       case 'quote': drawQuoteCard(ctx, card as QuoteScene, time, W, H); return;
       case 'bigstat': drawBigStatCard(ctx, card as BigStatScene, time, W, H); return;
       case 'quiz': drawQuizCard(ctx, card as QuizScene, time, W, H, ui); return;
+      case 'challenge': drawChallengeCard(ctx, card as ChallengeScene, time, W, H, ui); return;
+      case 'viz': drawVizCard(ctx, card as VizScene, time, W, H); return;
     }
   }
 
@@ -381,47 +391,61 @@ function drawWorld(
   drawMascots(ctx, prep, time, codeSlot);
 }
 
-// ── Mascot scenes (overlay actors beside the current panel) ─────────────────────
+// ── Mascot: ONE persistent companion, always docked bottom-right ────────────────
+// Bit stays put whenever code/terminal is on screen (drawWorld already skips this
+// on full-screen cards). It never pops in and out per scene and never switches
+// sides — a `mascot` scene only changes what it's DOING and which line it points
+// at. Consistent presence, one direction.
 function drawMascots(ctx: CanvasRenderingContext2D, prep: Prepared, time: number, codeSlot: PanelSlot | null) {
   const { dsl } = prep;
   const W = dsl.width, H = dsl.height;
+
+  const termActive = dsl.scenes.some(
+    (s) => s.type === 'terminal' && time >= s.startTime - 1e-6 && time < s.startTime + s.duration,
+  );
+  if (!codeSlot && !termActive) return; // no code on screen → no Bit (cards own the frame)
+
+  // the mascot scene in effect right now (drives action + pointed line)
+  let m: MascotScene | null = null;
+  let mStart = -1;
   for (const s of dsl.scenes) {
     if (s.type !== 'mascot') continue;
-    if (time < s.startTime - 1e-6 || time > s.startTime + s.duration) continue;
-    const m = s as MascotScene;
-    const local = time - s.startTime;
-    const scale = (H / 1080) * 0.95;
-
-    let x: number, y: number, flip = false;
-    let aimX: number | undefined, aimY: number | undefined;
-
-    if (codeSlot) {
-      const rect = codeSlot.rect;
-      const side = m.side === 'left' ? -1 : 1;
-      x = clamp(side < 0 ? rect.x - 96 * scale : rect.x + rect.w + 96 * scale, 74 * scale, W - 74 * scale);
-      y = Math.min(rect.y + rect.h + 8, H - 36);
-      flip = side > 0; // face the panel
-      if (m.line) {
-        const scene = dsl.scenes[codeSlot.idx] as CodeScene | DiffScene;
-        const fs = codeFont(scene, dsl);
-        aimX = side < 0 ? rect.x + 40 : rect.x + rect.w - 40;
-        aimY = rect.y + TITLE_H + PAD + (m.line - 1) * lineH(fs) + fs / 2;
-        y = clamp(aimY + 170 * scale, rect.y + TITLE_H + 190 * scale, H - 36);
-      }
-    } else {
-      x = W - 180 * scale;
-      y = H - 64;
-      flip = true;
+    if (time >= s.startTime - 1e-6 && time < s.startTime + s.duration && s.startTime >= mStart) {
+      m = s as MascotScene;
+      mStart = s.startTime;
     }
-
-    drawMascot(ctx, {
-      x, y, scale,
-      action: m.action as MascotAction,
-      local,
-      life: s.duration,
-      aimX, aimY, flip,
-    });
   }
+
+  const rs = H / 1080;
+  const scale = 0.66 * rs;
+  const x = W - 210 * rs; // pulled in from the edge so nothing clips
+  const y = H - 236 * rs; // feet here; body rises into the right margin, fully in frame
+
+  // aim: the pointed line if asked, else a soft gaze at the panel
+  let aimX: number | undefined;
+  let aimY: number | undefined;
+  const rect = codeSlot?.rect;
+  if (rect) {
+    if (m && m.line) {
+      const scene = dsl.scenes[codeSlot!.idx] as CodeScene | DiffScene;
+      const lh = lineH(codeFont(scene, dsl));
+      aimX = rect.x + rect.w - 40;
+      aimY = rect.y + TITLE_H + PAD + (m.line - 0.5) * lh;
+    } else {
+      aimX = rect.x + rect.w * 0.5;
+      aimY = rect.y + rect.h * 0.55;
+    }
+  }
+
+  drawMascot(ctx, {
+    x, y, scale,
+    action: (m?.action as MascotAction) || 'idle',
+    local: m ? time - m.startTime : time, // action clock (relative while acting)
+    enterLocal: 999, // always fully present — no entrance pop on action changes
+    life: Infinity,
+    aimX, aimY,
+    flip: true, // docked right, always facing the code
+  });
 }
 
 /** Camera target following the changing region of a morphing code panel. */
@@ -1309,8 +1333,11 @@ function drawQuizCard(ctx: CanvasRenderingContext2D, scene: QuizScene, time: num
   const enter = easeOutCubic(clamp(local / 0.55, 0, 1));
   const lay = quizLayout(scene, W, H);
   const quiz = ui?.quiz;
-  // interactive: reveal only after an answer; export: timed reveal
-  const revealed = quiz ? quiz.selected != null : local >= quizRevealAt(scene);
+  // in the live player NEVER reveal on a timer — only once the learner answers.
+  // the timed reveal is for export (non-interactive) rendering only.
+  const revealed = ui?.interactive
+    ? quiz?.selected != null
+    : local >= quizRevealAt(scene);
   const selected = quiz?.selected ?? null;
 
   ctx.save();
@@ -1432,17 +1459,360 @@ function drawQuizCard(ctx: CanvasRenderingContext2D, scene: QuizScene, time: num
       ? quiz.selected == null ? 'think' : quiz.correct ? 'celebrate' : 'shocked'
       : 'celebrate';
     drawMascot(ctx, {
-      x: lay.card.x - 104 * (H / 1080),
+      // right of the card — same side Bit lives on during code (consistency)
+      x: lay.card.x + lay.card.w + 104 * (H / 1080),
       y: lay.card.y + lay.card.h,
       scale: (H / 1080) * 0.82,
       action,
       local: mascotLocal,
+      enterLocal: 999,
       life: Infinity,
-      aimX: lay.card.x + lay.card.w * 0.25,
+      aimX: lay.card.x + lay.card.w * 0.75,
       aimY: lay.card.y + 60,
+      flip: true,
     });
   }
   ctx.restore();
+}
+
+// ── Challenge card ───────────────────────────────────────────────────────────────
+// Interactive: the DOM overlay (ChallengeCard.tsx) owns the editor; this canvas
+// layer is the backdrop + the export rendering (prompt, then the solution).
+function drawChallengeCard(ctx: CanvasRenderingContext2D, scene: ChallengeScene, time: number, W: number, H: number, ui?: RenderUI) {
+  const a = cardAlpha(scene, time);
+  if (a <= 0) return;
+  const local = time - scene.startTime;
+  const enter = easeOutCubic(clamp(local / 0.55, 0, 1));
+  const cardW = Math.min(W * 0.66, 1240);
+  const cardH = Math.min(H * 0.62, 640);
+  const cx = W / 2 - cardW / 2;
+  const cy = H / 2 - cardH / 2;
+  // export reveals the solution partway through; interactive never does
+  const reveal = !ui?.interactive && local > Math.min(scene.duration * 0.5, 4);
+
+  ctx.save();
+  ctx.globalAlpha = a * enter;
+  ctx.translate(0, (1 - enter) * 26);
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur = 70;
+  ctx.shadowOffsetY = 30;
+  ctx.fillStyle = '#15151d';
+  roundRect(ctx, cx, cy, cardW, cardH, 22);
+  ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = C.border;
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, cx, cy, cardW, cardH, 22);
+  ctx.stroke();
+
+  const pad = 44;
+  // eyebrow
+  const ebFs = Math.round(H / 60);
+  ctx.font = `700 ${ebFs}px ${MONO}`;
+  ctx.fillStyle = C.green;
+  ctx.fillText('◆ YOUR TURN', cx + pad, cy + pad + ebFs);
+
+  // prompt
+  const pFs = Math.round(H / 28);
+  ctx.font = `700 ${pFs}px ${MONO}`;
+  ctx.fillStyle = C.text;
+  const pLines = wrapText(ctx, scene.prompt, cardW - pad * 2).slice(0, 3);
+  let y = cy + pad + ebFs + 30 + pFs;
+  for (const l of pLines) { ctx.fillText(l, cx + pad, y); y += pFs * 1.35; }
+
+  // code box (starter, or the solution on export reveal)
+  const boxY = y + 14;
+  const boxH = cy + cardH - pad - boxY;
+  ctx.fillStyle = '#0e0e14';
+  roundRect(ctx, cx + pad, boxY, cardW - pad * 2, boxH, 12);
+  ctx.fill();
+  ctx.strokeStyle = C.sep;
+  roundRect(ctx, cx + pad, boxY, cardW - pad * 2, boxH, 12);
+  ctx.stroke();
+
+  const codeFs = Math.round(H / 40);
+  ctx.font = `${codeFs}px ${MONO}`;
+  ctx.fillStyle = reveal ? C.terminal : C.dim;
+  const src = (reveal ? scene.solution : scene.starterCode) || '';
+  src.split('\n').slice(0, Math.floor((boxH - 24) / (codeFs * 1.5))).forEach((line, i) => {
+    ctx.fillText(line, cx + pad + 20, boxY + 24 + codeFs + i * codeFs * 1.5);
+  });
+
+  // footer label
+  ctx.font = `500 ${Math.round(H / 52)}px ${MONO}`;
+  ctx.fillStyle = C.dim;
+  ctx.textAlign = 'right';
+  ctx.fillText(reveal ? 'one solution' : `${scene.tests.length} tests`, cx + cardW - pad, boxY - 16);
+  ctx.textAlign = 'left';
+  ctx.restore();
+
+  // Bit cheers the challenge on (right side, consistent)
+  const mLocal = ui?.interactive ? (ui.uiTime ?? 0) : (reveal ? local : 0.4);
+  ctx.globalAlpha = a;
+  drawMascot(ctx, {
+    x: cx + cardW + 100 * (H / 1080),
+    y: cy + cardH,
+    scale: (H / 1080) * 0.8,
+    action: reveal ? 'celebrate' : 'point',
+    local: mLocal,
+    enterLocal: 999,
+    life: Infinity,
+    aimX: cx + cardW * 0.7,
+    aimY: cy + cardH * 0.4,
+    flip: true,
+  });
+}
+
+// ── Concept visualization (LEAP 4) ──────────────────────────────────────────────
+// Animate the IDEA: an array being sorted, a pointer walking, the call stack
+// growing, a variable accumulating. Steps carry full state; we tween between the
+// previous and current step so values pop, pointers glide, and stack frames
+// push/pop. One general renderer covers sorting, searching, recursion, loops.
+
+/** Scene-relative time each step begins (shared with the Conductor for cues). */
+export function vizStepTimes(scene: VizScene): number[] {
+  const n = Math.max(scene.steps.length, 1);
+  const window = Math.min(scene.narrationDuration ?? scene.duration, scene.duration);
+  const slot = window / n;
+  return scene.steps.map((_, i) => i * slot);
+}
+
+function vizStateAt(scene: VizScene, local: number): { prev: VizStep; cur: VizStep; tp: number } {
+  const n = Math.max(scene.steps.length, 1);
+  const window = Math.min(scene.narrationDuration ?? scene.duration, scene.duration);
+  const slot = window / n;
+  const idx = clamp(Math.floor(local / slot), 0, n - 1);
+  const transDur = Math.min(0.55, slot * 0.6);
+  const tp = easeInOut(clamp((local - idx * slot) / transDur, 0, 1));
+  return { prev: scene.steps[Math.max(0, idx - 1)] || {}, cur: scene.steps[idx] || {}, tp };
+}
+
+function drawVizCard(ctx: CanvasRenderingContext2D, scene: VizScene, time: number, W: number, H: number) {
+  const a = cardAlpha(scene, time);
+  if (a <= 0 || !scene.steps.length) return;
+  const local = time - scene.startTime;
+  const { prev, cur, tp } = vizStateAt(scene, local);
+
+  ctx.save();
+  ctx.globalAlpha = a;
+
+  // title
+  if (scene.title) {
+    ctx.font = `700 ${Math.round(H / 22)}px ${MONO}`;
+    ctx.fillStyle = C.text;
+    ctx.textAlign = 'center';
+    ctx.fillText(scene.title, W / 2, H * 0.14);
+    ctx.textAlign = 'left';
+  }
+
+  // stable geometry across steps (size for the largest state so nothing jumps)
+  const maxLen = Math.max(1, ...scene.steps.map((s) => s.array?.length || 0));
+  const hasStack = scene.steps.some((s) => (s.stack?.length || 0) > 0);
+  const arrAreaW = (hasStack ? W * 0.62 : W * 0.82);
+  const cw = Math.min(122, arrAreaW / maxLen - 14);
+  const gap = 14;
+  const rowW = maxLen * cw + (maxLen - 1) * gap;
+  const arrCX = hasStack ? W * 0.40 : W / 2;
+  const cx0 = arrCX - rowW / 2;
+  const arrY = H * 0.5 - cw / 2;
+  const cellX = (i: number) => cx0 + i * (cw + gap);
+
+  // ── variables row (above the array) ──
+  drawVizVars(ctx, prev.vars, cur.vars, tp, arrCX, arrY - cw * 0.9, H);
+
+  // ── array cells ──
+  const arr = cur.array || prev.array;
+  if (arr) {
+    const hl = new Set(cur.highlight || []);
+    const done = new Set(cur.done || []);
+    const cmp = new Set(cur.compare || []);
+    for (let i = 0; i < arr.length; i++) {
+      const x = cellX(i);
+      let border = 'rgba(255,255,255,0.16)';
+      let fill = '#1a1a24';
+      let glow = '';
+      if (done.has(i)) { border = withAlpha(C.green, 0.8); fill = withAlpha(C.green, 0.1); glow = C.green; }
+      else if (cmp.has(i)) { border = withAlpha('#fbbf24', 0.85); fill = 'rgba(251,191,36,0.1)'; glow = '#fbbf24'; }
+      else if (hl.has(i)) { border = withAlpha(C.accent, 0.85); fill = withAlpha(C.accent, 0.12); glow = C.accent; }
+
+      ctx.save();
+      if (glow) { ctx.shadowColor = withAlpha(glow, 0.6); ctx.shadowBlur = 22; }
+      ctx.fillStyle = fill;
+      roundRect(ctx, x, arrY, cw, cw, 12);
+      ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle = border;
+      ctx.lineWidth = 2;
+      roundRect(ctx, x, arrY, cw, cw, 12);
+      ctx.stroke();
+
+      // value: pop when it changed from the previous step
+      const changed = prev.array && prev.array[i] !== arr[i];
+      const pop = changed ? 0.7 + 0.3 * tp : 1;
+      ctx.save();
+      ctx.globalAlpha = a * (changed ? 0.5 + 0.5 * tp : 1);
+      ctx.translate(x + cw / 2, arrY + cw / 2);
+      ctx.scale(pop, pop);
+      ctx.font = `700 ${Math.round(cw * 0.4)}px ${MONO}`;
+      ctx.fillStyle = C.text;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(arr[i]), 0, 1);
+      ctx.restore();
+
+      // index label
+      ctx.font = `${Math.round(cw * 0.22)}px ${MONO}`;
+      ctx.fillStyle = C.dim;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText(String(i), x + cw / 2, arrY + cw + Math.round(cw * 0.34));
+    }
+    ctx.textAlign = 'left';
+
+    // ── pointers (glide between steps) ──
+    drawVizPointers(ctx, prev.pointers, cur.pointers, tp, cellX, cw, arrY + cw + cw * 0.5, a);
+  }
+
+  // ── stack (right side) ──
+  if (hasStack) drawVizStack(ctx, prev.stack || [], cur.stack || [], tp, W * 0.82, H, a);
+
+  // ── caption ──
+  if (cur.caption) {
+    const fs = Math.round(H / 34);
+    ctx.font = `500 ${fs}px ${MONO}`;
+    ctx.globalAlpha = a * (0.4 + 0.6 * tp);
+    ctx.fillStyle = C.text;
+    ctx.textAlign = 'center';
+    const lines = wrapText(ctx, cur.caption, W * 0.7).slice(0, 2);
+    lines.forEach((l, i) => ctx.fillText(l, W / 2, H * 0.8 + i * fs * 1.4));
+    ctx.textAlign = 'left';
+  }
+
+  ctx.restore();
+}
+
+function drawVizVars(ctx: CanvasRenderingContext2D, prev: Record<string, string> | undefined, cur: Record<string, string> | undefined, tp: number, cx: number, y: number, H: number) {
+  const vars = cur || prev;
+  if (!vars) return;
+  const keys = Object.keys(vars);
+  if (!keys.length) return;
+  const boxW = 148, boxH = 84, gap = 20;
+  // the box is anchored so its BOTTOM sits at `y` (just above the array)
+  const top = y - boxH;
+  const totalW = keys.length * boxW + (keys.length - 1) * gap;
+  let x = cx - totalW / 2;
+  const kFs = Math.round(H / 56), vFs = Math.round(H / 38);
+  ctx.textBaseline = 'alphabetic';
+  for (const k of keys) {
+    const changed = prev && prev[k] !== vars[k];
+    ctx.fillStyle = '#191922';
+    roundRect(ctx, x, top, boxW, boxH, 11);
+    ctx.fill();
+    ctx.strokeStyle = changed ? withAlpha(C.accent, 0.5 + 0.4 * tp) : C.border;
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, x, top, boxW, boxH, 11);
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    // label near the top
+    ctx.font = `${kFs}px ${MONO}`;
+    ctx.fillStyle = C.dim;
+    ctx.fillText(k, x + boxW / 2, top + kFs + 12);
+    // value in the lower half, with room
+    ctx.font = `700 ${vFs}px ${MONO}`;
+    ctx.fillStyle = changed ? C.accent : C.text;
+    const pop = changed ? 0.7 + 0.3 * tp : 1;
+    ctx.save();
+    ctx.translate(x + boxW / 2, top + boxH - 18);
+    ctx.scale(pop, pop);
+    ctx.fillText(String(vars[k]), 0, 0);
+    ctx.restore();
+    x += boxW + gap;
+  }
+  ctx.textAlign = 'left';
+}
+
+function drawVizPointers(ctx: CanvasRenderingContext2D, prev: VizStep['pointers'], cur: VizStep['pointers'], tp: number, cellX: (i: number) => number, cw: number, y: number, alpha: number) {
+  const list = cur || [];
+  const prevBy = new Map((prev || []).map((p) => [p.name, p.index]));
+  const curNames = new Set(list.map((p) => p.name));
+  const fs = Math.round(cw * 0.26);
+  // draw current pointers (glide from previous index if it existed)
+  for (const p of list) {
+    const from = prevBy.has(p.name) ? prevBy.get(p.name)! : p.index;
+    const idx = lerp(from, p.index, tp);
+    const x = cellX(idx) + cw / 2;
+    ctx.save();
+    ctx.globalAlpha = alpha * (prevBy.has(p.name) ? 1 : tp);
+    ctx.fillStyle = C.accent;
+    // arrow head
+    ctx.beginPath();
+    ctx.moveTo(x, y - 4);
+    ctx.lineTo(x - 9, y + 12);
+    ctx.lineTo(x + 9, y + 12);
+    ctx.closePath();
+    ctx.fill();
+    ctx.font = `700 ${fs}px ${MONO}`;
+    ctx.textAlign = 'center';
+    ctx.fillText(p.name, x, y + 12 + fs + 4);
+    ctx.restore();
+  }
+  // fade out pointers that were removed
+  for (const p of prev || []) {
+    if (curNames.has(p.name)) continue;
+    const x = cellX(p.index) + cw / 2;
+    ctx.save();
+    ctx.globalAlpha = alpha * (1 - tp) * 0.7;
+    ctx.fillStyle = C.dim;
+    ctx.beginPath();
+    ctx.moveTo(x, y - 4);
+    ctx.lineTo(x - 9, y + 12);
+    ctx.lineTo(x + 9, y + 12);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.textAlign = 'left';
+}
+
+function drawVizStack(ctx: CanvasRenderingContext2D, prev: string[], cur: string[], tp: number, cx: number, H: number, alpha: number) {
+  const frameW = 220, frameH = 52, gap = 8;
+  const baseY = H * 0.72;
+  const growing = cur.length > prev.length;
+  const shrinking = cur.length < prev.length;
+  const frames = growing ? cur : prev; // draw whichever has the extra frame
+
+  ctx.textAlign = 'center';
+  ctx.font = `600 ${Math.round(frameH * 0.4)}px ${MONO}`;
+  for (let i = 0; i < frames.length; i++) {
+    const isNewTop = growing && i === cur.length - 1;
+    const isPoppingTop = shrinking && i === prev.length - 1;
+    const y = baseY - i * (frameH + gap);
+    let a = alpha;
+    let dx = 0;
+    if (isNewTop) { a = alpha * tp; dx = (1 - tp) * 40; }        // slide/fade in
+    else if (isPoppingTop) { a = alpha * (1 - tp); dx = tp * 40; } // slide/fade out
+
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = i === (growing ? cur.length : prev.length) - 1 ? withAlpha(C.accent, 0.14) : '#191922';
+    roundRect(ctx, cx - frameW / 2 + dx, y - frameH, frameW, frameH, 9);
+    ctx.fill();
+    ctx.strokeStyle = i === (growing ? cur.length : prev.length) - 1 ? withAlpha(C.accent, 0.7) : C.border;
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, cx - frameW / 2 + dx, y - frameH, frameW, frameH, 9);
+    ctx.stroke();
+    ctx.fillStyle = C.text;
+    ctx.fillText(frames[i], cx + dx, y - frameH / 2 + Math.round(frameH * 0.15));
+    ctx.restore();
+  }
+  // label
+  ctx.globalAlpha = alpha * 0.6;
+  ctx.font = `600 ${Math.round(frameH * 0.32)}px ${MONO}`;
+  ctx.fillStyle = C.dim;
+  ctx.fillText('call stack', cx, baseY + 34);
+  ctx.textAlign = 'left';
 }
 
 // ── Narration captions (burned-in subtitles from the voiceover script) ─────────

@@ -1,5 +1,5 @@
 import { SoundEngine } from './sounds';
-import { Prepared, bulletRevealTimes, diagramNodeTimes, quizRevealAt } from './renderer';
+import { Prepared, bulletRevealTimes, diagramNodeTimes, quizRevealAt, vizStepTimes } from './renderer';
 import { addRowAt } from './morph';
 import { revealedCount } from './timing';
 
@@ -98,6 +98,11 @@ export class Conductor {
         diagramNodeTimes(s).forEach((at, ni) => {
           const t = s.startTime + at;
           this.cue(`node:${i}:${ni}`, time >= t && prev < t, () => this.engine.pop());
+        });
+      } else if (s.type === 'viz') {
+        vizStepTimes(s).forEach((at, si) => {
+          const t = s.startTime + at;
+          this.cue(`viz:${i}:${si}`, time >= t && prev < t, () => this.engine.pop(0.2, 1.1 + (si % 3) * 0.06));
         });
       } else if (s.type === 'quiz' && !this.interactive) {
         const t = s.startTime + quizRevealAt(s);

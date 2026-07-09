@@ -220,6 +220,48 @@ export function normalizeDSL(raw: any): AnimationDSL {
           ...base,
         };
       }
+      case 'viz': {
+        const steps = Array.isArray(s.steps)
+          ? s.steps.slice(0, 16).map((st: any) => ({
+              caption: st.caption ? String(st.caption) : undefined,
+              array: Array.isArray(st.array) ? st.array.map((v: any) => String(v)).slice(0, 16) : undefined,
+              highlight: Array.isArray(st.highlight) ? st.highlight.map((n: any) => Number(n)).filter((n: number) => isFinite(n)) : undefined,
+              compare: Array.isArray(st.compare) && st.compare.length === 2 ? [Number(st.compare[0]), Number(st.compare[1])] as [number, number] : undefined,
+              done: Array.isArray(st.done) ? st.done.map((n: any) => Number(n)).filter((n: number) => isFinite(n)) : undefined,
+              pointers: Array.isArray(st.pointers)
+                ? st.pointers.filter((p: any) => p && p.name != null && isFinite(Number(p.index))).map((p: any) => ({ name: String(p.name), index: Number(p.index) })).slice(0, 6)
+                : undefined,
+              vars: st.vars && typeof st.vars === 'object' ? Object.fromEntries(Object.entries(st.vars).slice(0, 6).map(([k, v]) => [String(k), String(v)])) : undefined,
+              stack: Array.isArray(st.stack) ? st.stack.map((v: any) => String(v)).slice(0, 10) : undefined,
+            }))
+          : [];
+        return {
+          type: 'viz',
+          title: s.title ? String(s.title) : undefined,
+          vizKind: ['array', 'stack', 'vars'].includes(s.vizKind) ? s.vizKind : 'array',
+          steps,
+          ...base,
+        };
+      }
+      case 'challenge': {
+        const tests = Array.isArray(s.tests)
+          ? s.tests
+              .filter((t: any) => t && typeof t.expression === 'string')
+              .map((t: any) => ({ expression: String(t.expression), expected: String(t.expected ?? '') }))
+              .slice(0, 8)
+          : [];
+        return {
+          type: 'challenge',
+          language: String(s.language || 'python'),
+          prompt: String(s.prompt ?? ''),
+          starterCode: String(s.starterCode ?? ''),
+          solution: String(s.solution ?? ''),
+          tests,
+          hint: s.hint ? String(s.hint) : undefined,
+          concept: s.concept ? String(s.concept) : undefined,
+          ...base,
+        };
+      }
       case 'wait':
       default:
         return { type: 'wait', ...base };
@@ -287,7 +329,7 @@ export function repace(dsl: AnimationDSL): AnimationDSL {
   if (dsl.scenes.some((s) => s.type === 'sprite')) return dsl;
 
   const SECTION_GAP = 0.22;
-  const AFTER_CLICK_PAUSE = 0.8;
+  const AFTER_CLICK_PAUSE = 0.35; // brief beat between Run and output — not dead air
   let cursor = 0;
   let panelStart = 0;
   let panelEnd = 0;
@@ -358,11 +400,30 @@ export function repace(dsl: AnimationDSL): AnimationDSL {
         cursor = panelEnd + SECTION_GAP;
         return { ...s, startTime: start, duration };
       }
+      case 'viz': {
+        // each step needs a beat to read; narration stretches it further
+        const start = cursor;
+        const duration = Math.max(s.duration, 1.2 + s.steps.length * 1.3);
+        panelStart = start;
+        panelEnd = start + duration;
+        cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
       case 'quiz': {
         // export needs time to read the question and reveal the answer; the
         // interactive player pauses here anyway.
         const start = cursor;
         const duration = Math.max(s.duration, 5 + s.options.length * 0.8);
+        panelStart = start;
+        panelEnd = start + duration;
+        cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'challenge': {
+        // the interactive player pauses here for the learner to solve; export
+        // shows the prompt then reveals the solution.
+        const start = cursor;
+        const duration = Math.max(s.duration, 8);
         panelStart = start;
         panelEnd = start + duration;
         cursor = panelEnd + SECTION_GAP;

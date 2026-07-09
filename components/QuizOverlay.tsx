@@ -56,7 +56,7 @@ export function QuizOverlay({ scene, frameW, frameH, selected, correct, onAnswer
           position: absolute;
           background: transparent;
           border: 2px solid transparent;
-          border-radius: 3.5%/8%;
+          border-radius: 14px;
           cursor: pointer;
           transition: border-color 0.12s ease, background 0.12s ease;
         }
