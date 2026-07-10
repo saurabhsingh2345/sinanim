@@ -395,6 +395,21 @@ export interface BrowserScene extends BaseScene {
   clickBlock?: number;
 }
 
+// ── Real browser recording (from scripts/capture-browser.mts) ───────────────────
+// Plays a deterministic capture of a REAL web page inside the lesson, framed in
+// the same window chrome as the mock browser. Put clips in public/captures/.
+export interface BrowserRecScene extends BaseScene {
+  type: 'browserrec';
+  /** Video URL, e.g. "/captures/search-demo.mp4". */
+  src: string;
+  /** Window title. */
+  title?: string;
+  /** Address-bar URL shown in the chrome. */
+  url?: string;
+  /** Video seconds to start from (default 0). */
+  clipStart?: number;
+}
+
 // ── Split: editor + live preview ────────────────────────────────────────────────
 export interface SplitStep {
   caption?: string;
@@ -494,6 +509,7 @@ export type Scene =
   | IdeScene
   | CliScene
   | BrowserScene
+  | BrowserRecScene
   | SplitScene
   | ApiScene
   | PrScene
@@ -512,7 +528,7 @@ export const OVERLAY_TYPES = new Set(['mascot', 'highlight', 'text', 'sprite', '
 /** Primary full-frame card types (one owns the frame at a time). */
 export const PRIMARY_CARD_TYPES = new Set([
   'title', 'chapter', 'bullets', 'diagram', 'quote', 'bigstat', 'quiz', 'challenge', 'viz',
-  'ide', 'cli', 'browser', 'split', 'api', 'pr', 'layout',
+  'ide', 'cli', 'browser', 'browserrec', 'split', 'api', 'pr', 'layout',
 ]);
 
 export interface AnimationDSL {

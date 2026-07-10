@@ -3,6 +3,7 @@ import {
   ApiScene,
   BigStatScene,
   BrowserBlock,
+  BrowserRecScene,
   BrowserScene,
   BulletsScene,
   CliScene,
@@ -62,6 +63,8 @@ export interface Prepared {
   words?: Map<number, WordTiming[]>;
   /** Lazy per-scene karaoke caption pages (built on first draw). */
   captionPages?: Map<number, CaptionPage[]>;
+  /** browserrec sceneIndex -> its <video> (browser only; Node draws a slate). */
+  videos?: Map<number, HTMLVideoElement>;
 }
 
 /** Live UI state the interactive player feeds in (never set during export). */
@@ -85,6 +88,7 @@ export async function prepare(dsl: AnimationDSL): Promise<Prepared> {
   const schedule = new Map<number, number[]>();
   const typedText = new Map<number, string>();
   const ideTokens = new Map<number, Map<string, Tok[][]>>();
+  const videos = new Map<number, HTMLVideoElement>();
   await Promise.all(
     dsl.scenes.map(async (s, i) => {
       // Narration-paced content window: code should land WITH the voice, not
@@ -149,10 +153,53 @@ export async function prepare(dsl: AnimationDSL): Promise<Prepared> {
           if (code && !m.has(key)) m.set(key, await tokenizeCode(code, lang));
         }));
         ideTokens.set(i, m);
+      } else if (s.type === 'browserrec' && typeof window !== 'undefined' && s.src) {
+        // load the capture clip; fail-soft to a slate if it never arrives
+        const video = document.createElement('video');
+        video.src = s.src;
+        video.muted = true;
+        video.preload = 'auto';
+        video.playsInline = true;
+        await Promise.race([
+          new Promise<void>((res) => {
+            video.addEventListener('loadeddata', () => res(), { once: true });
+            video.addEventListener('error', () => res(), { once: true });
+          }),
+          new Promise<void>((res) => setTimeout(res, 5000)),
+        ]);
+        if (video.readyState >= 2) videos.set(i, video);
       }
     }),
   );
-  return { dsl, morphs, schedule, typedText, ideTokens };
+  return { dsl, morphs, schedule, typedText, ideTokens, videos };
+}
+
+/**
+ * Seek every active browserrec clip to the exact frame for `time` and wait for
+ * the decoder. The fast (WebCodecs) exporter awaits this before each
+ * renderFrame so captures land frame-accurate in the file; the live player
+ * skips it (renderFrame drift-corrects on its own, close enough for preview).
+ */
+export async function syncSceneVideos(prep: Prepared, time: number): Promise<void> {
+  if (!prep.videos?.size) return;
+  const jobs: Promise<void>[] = [];
+  prep.videos.forEach((video, i) => {
+    const s = prep.dsl.scenes[i];
+    if (s.type !== 'browserrec') return;
+    if (time < s.startTime || time >= s.startTime + s.duration) return;
+    const local = Math.min(time - s.startTime + (s.clipStart ?? 0), Math.max(video.duration - 0.05, 0));
+    if (Math.abs(video.currentTime - local) < 0.017) return;
+    jobs.push(
+      Promise.race([
+        new Promise<void>((res) => {
+          video.addEventListener('seeked', () => res(), { once: true });
+          video.currentTime = local;
+        }),
+        new Promise<void>((res) => setTimeout(res, 250)),
+      ]),
+    );
+  });
+  await Promise.all(jobs);
 }
 
 // ── Palette / constants (mutated per-frame from ThemePack) ─────────────────────
@@ -524,6 +571,7 @@ function drawWorld(
       case 'ide': drawIdeCard(ctx, prep, card as IdeScene, time, W, H); return;
       case 'cli': drawCliCard(ctx, card as CliScene, time, W, H); return;
       case 'browser': drawBrowserCard(ctx, card as BrowserScene, time, W, H); return;
+      case 'browserrec': drawBrowserRecCard(ctx, prep, card as BrowserRecScene, time, W, H); return;
       case 'split': drawSplitCard(ctx, prep, card as SplitScene, time, W, H); return;
       case 'api': drawApiCard(ctx, card as ApiScene, time, W, H); return;
       case 'pr': drawPrCard(ctx, prep, card as PrScene, time, W, H); return;
@@ -3550,6 +3598,83 @@ function langLabel(lang: string): string {
     css: 'style.css', json: 'data.json', sql: 'query.sql',
   };
   return map[lang.toLowerCase()] || lang;
+}
+
+// ── Real browser recording card ─────────────────────────────────────────────────
+// A capture-browser.mts clip inside the studio window chrome: same float/glow
+// as every other surface, but the page inside is a REAL recording. The live
+// player drift-corrects the <video> here; exports use syncSceneVideos for
+// frame-exact seeks. Without a video (Node, missing file) it draws a slate.
+function drawBrowserRecCard(
+  ctx: CanvasRenderingContext2D,
+  prep: Prepared,
+  scene: BrowserRecScene,
+  time: number,
+  W: number,
+  H: number,
+) {
+  const idx = prep.dsl.scenes.indexOf(scene);
+  const video = prep.videos?.get(idx);
+  const local = time - scene.startTime;
+
+  const win: Rect = { x: W * 0.07, y: H * 0.075, w: W * 0.86, h: H * 0.85 };
+  const enter = easeOutCubic(clamp(local / 0.5, 0, 1));
+  ctx.save();
+  ctx.globalAlpha = enter;
+  ctx.translate(0, (1 - enter) * 24);
+
+  drawChrome(ctx, win, scene.title || 'Recording');
+
+  // URL pill in the title bar (browser feel without the mock tabs)
+  if (scene.url) {
+    const fs = Math.round(H / 62);
+    ctx.font = `${fs}px ${MONO}`;
+    const tw = ctx.measureText(scene.url).width;
+    const pw = Math.min(tw + 40, win.w * 0.5);
+    const px = win.x + win.w / 2 - pw / 2;
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    roundRect(ctx, px, win.y + 8, pw, TITLE_H - 16, 9);
+    ctx.fill();
+    ctx.fillStyle = C.dim;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillText(scene.url, win.x + win.w / 2, win.y + TITLE_H / 2 + 1, pw - 24);
+    ctx.textAlign = 'left';
+  }
+
+  const content: Rect = { x: win.x + 2, y: win.y + TITLE_H, w: win.w - 4, h: win.h - TITLE_H - 2 };
+  ctx.save();
+  roundRect(ctx, win.x, win.y, win.w, win.h, 18);
+  ctx.clip();
+
+  if (video && video.readyState >= 2) {
+    // live preview drift-correct (exports seek precisely via syncSceneVideos)
+    const target = Math.min(local + (scene.clipStart ?? 0), Math.max(video.duration - 0.05, 0));
+    if (Math.abs(video.currentTime - target) > 0.08 && !video.seeking) {
+      try { video.currentTime = target; } catch {}
+    }
+    // cover-fit the clip into the content area
+    const vw = video.videoWidth || 16, vh = video.videoHeight || 9;
+    const scale = Math.max(content.w / vw, content.h / vh);
+    const dw = vw * scale, dh = vh * scale;
+    ctx.drawImage(video, content.x + (content.w - dw) / 2, content.y + (content.h - dh) / 2, dw, dh);
+  } else {
+    // slate: headless renders and missing clips stay presentable
+    ctx.fillStyle = '#0e0e14';
+    ctx.fillRect(content.x, content.y, content.w, content.h);
+    const fs = Math.round(H / 40);
+    ctx.font = `500 ${fs}px ${MONO}`;
+    ctx.fillStyle = C.dim;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('▶ browser recording', content.x + content.w / 2, content.y + content.h / 2 - fs);
+    ctx.font = `${Math.round(fs * 0.72)}px ${MONO}`;
+    ctx.fillStyle = C.faint;
+    ctx.fillText(scene.src || 'no clip', content.x + content.w / 2, content.y + content.h / 2 + fs * 0.6);
+    ctx.textAlign = 'left';
+  }
+  ctx.restore();
+  ctx.restore();
 }
 
 // ── Card enter transitions ──────────────────────────────────────────────────────

@@ -23,7 +23,7 @@ export interface NarrationResult {
 }
 
 /** Pause stitched between sentences (s) — a natural breath. */
-const SENTENCE_GAP = 0.18;
+export const SENTENCE_GAP = 0.18;
 /** Kokoro stays reliable under ~300 chars; hard-split anything longer. */
 const MAX_SENTENCE = 300;
 
@@ -51,7 +51,7 @@ export function splitSentences(text: string): string[] {
 }
 
 /** Stitch sentence clips into one continuous clip with gaps between them. */
-function stitchClips(clips: SynthesizedClip[]): SynthesizedClip {
+export function stitchClips(clips: SynthesizedClip[]): SynthesizedClip {
   const sampleRate = clips[0]?.sampleRate || 24000;
   const gap = Math.round(SENTENCE_GAP * sampleRate);
   const total = clips.reduce((a, c) => a + c.samples.length, 0) + gap * Math.max(0, clips.length - 1);

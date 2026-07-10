@@ -468,6 +468,15 @@ export function normalizeDSL(raw: any): AnimationDSL {
           ...base,
         };
       }
+      case 'browserrec':
+        return {
+          type: 'browserrec',
+          src: String(s.src ?? ''),
+          title: s.title ? String(s.title) : undefined,
+          url: s.url ? String(s.url) : undefined,
+          clipStart: isFinite(Number(s.clipStart)) ? Math.max(0, Number(s.clipStart)) : undefined,
+          ...base,
+        };
       case 'split': {
         const steps: SplitStep[] = Array.isArray(s.steps)
           ? s.steps.map((st: any) => ({
@@ -781,6 +790,13 @@ export function repace(dsl: AnimationDSL): AnimationDSL {
       case 'browser': {
         const start = cursor;
         const duration = Math.max(s.duration, 2 + s.blocks.length * 0.8);
+        panelStart = start; panelEnd = start + duration; cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'browserrec': {
+        // the clip's own length is the floor; narration can stretch it further
+        const start = cursor;
+        const duration = Math.max(s.duration, 3);
         panelStart = start; panelEnd = start + duration; cursor = panelEnd + SECTION_GAP;
         return { ...s, startTime: start, duration };
       }

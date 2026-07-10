@@ -66,6 +66,7 @@ export function sceneTypeLabel(type: Scene['type']): string {
     ide: 'VS Code',
     cli: 'Terminal',
     browser: 'Browser',
+    browserrec: 'Browser recording',
     split: 'Code + preview',
     layout: 'Side-by-side',
     api: 'API call',

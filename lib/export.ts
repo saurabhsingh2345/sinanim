@@ -1,4 +1,4 @@
-import { Prepared, renderFrame } from './renderer';
+import { Prepared, renderFrame, syncSceneVideos } from './renderer';
 import { SfxCollector, SoundEngine, renderSfxMix } from './sounds';
 import { Conductor } from './conductor';
 
@@ -220,6 +220,7 @@ export async function recordVideoFast(
   for (let i = 0; i < totalFrames; i++) {
     if (encodeError) throw encodeError;
     const t = Math.min(i / fps, dsl.duration);
+    await syncSceneVideos(prep, t); // frame-exact browserrec clips
     renderFrame(ctx, prep, t);
     const frame = new VideoFrame(canvas, {
       timestamp: Math.round(i * (1e6 / fps)),
