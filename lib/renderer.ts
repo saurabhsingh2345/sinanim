@@ -46,6 +46,7 @@ import {
   estimatedCaptionPages,
   findAnchorWord,
 } from './word-timeline';
+import { ansiToLines, parseAnsi, stripAnsi, hasAnsi } from './ansi';
 
 // ── Prepared timeline ─────────────────────────────────────────────────────────
 export interface Prepared {
@@ -104,14 +105,16 @@ export async function prepare(dsl: AnimationDSL): Promise<Prepared> {
         if (narrWindow) plan.timing = paceMorphToNarration(plan.timing, narrWindow);
         morphs.set(i, plan);
       } else if (s.type === 'terminal') {
-        let sched = typeSchedule(s.output, s.typingSpeed);
+        // schedule against the PLAIN text — recorded output may carry ANSI codes
+        const plain = stripAnsi(s.output);
+        let sched = typeSchedule(plain, s.typingSpeed);
         const natural = sched.length ? sched[sched.length - 1] : 0;
         if (narrWindow && natural > 0 && narrWindow > natural) {
           const factor = Math.min(narrWindow / natural, 3);
           sched = sched.map((t) => t * factor);
         }
         schedule.set(i, sched);
-        typedText.set(i, s.output);
+        typedText.set(i, plain);
       } else if (s.type === 'diff') {
         const [beforeToks, afterToks] = await Promise.all([
           tokenizeCode(s.before, s.language),
@@ -296,7 +299,10 @@ function sketchRoundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w:
   ctx.closePath();
 }
 
-function codeFont(s: { fontSize?: number }, dsl: AnimationDSL) { return s.fontSize || Math.round(dsl.height / 36); }
+// Width-aware: vertical (9:16 shorts) frames cap the size so code lines fit.
+function codeFont(s: { fontSize?: number }, dsl: AnimationDSL) {
+  return s.fontSize || Math.round(Math.min(dsl.height / 36, dsl.width / 26));
+}
 function lineH(fs: number) { return Math.round(fs * 1.6); }
 
 function withAlpha(hex: string, a: number): string {
@@ -600,7 +606,7 @@ function drawWorld(
       if (p.kind === 'code') codeScene = scene as CodeScene;
       runBtn = r.runBtn;
     } else {
-      drawTerminalPanel(ctx, scene as TerminalScene, p.rect, time, dsl);
+      drawTerminalPanel(ctx, prep, p.idx, p.rect, time, dsl);
     }
     ctx.restore();
   }
@@ -1046,7 +1052,8 @@ function drawClickFx(ctx: CanvasRenderingContext2D, b: Rect, time: number, start
 }
 
 // ── Terminal panel ─────────────────────────────────────────────────────────────────
-function drawTerminalPanel(ctx: CanvasRenderingContext2D, scene: TerminalScene, rect: Rect, time: number, dsl: AnimationDSL) {
+function drawTerminalPanel(ctx: CanvasRenderingContext2D, prep: Prepared, idx: number, rect: Rect, time: number, dsl: AnimationDSL) {
+  const scene = dsl.scenes[idx] as TerminalScene;
   const body = drawChrome(ctx, rect, 'zsh — output', false);
   const fs = scene.fontSize || Math.round(dsl.height / 38);
   const lh = lineH(fs);
@@ -1064,24 +1071,27 @@ function drawTerminalPanel(ctx: CanvasRenderingContext2D, scene: TerminalScene, 
   ctx.fillStyle = '#c9c8d4';
   ctx.fillText(' ' + ((scene.prompt || '').replace(/^\$\s*/, '') + (scene.command || '')).trim(), body.x + charW, baseY);
 
-  const total = scene.output.length;
+  // the PACED schedule from prepare() (narration-stretched, ANSI-stripped) —
+  // the same one the Conductor keys keystroke sounds off, so they can't drift
+  const { plain, colors } = parseAnsi(scene.output);
+  const total = plain.length;
   const local = time - scene.startTime;
-  const sched = typeSchedule(scene.output, scene.typingSpeed);
+  const sched = prep.schedule.get(idx) || typeSchedule(plain, scene.typingSpeed);
   const shown = revealedCount(sched, local);
   const done = shown >= total;
 
   let li = 0, col = 0;
   let headX = body.x, headY = baseY + lh;
-  for (let i = 0; i < scene.output.length; i++) {
-    const ch = scene.output[i];
+  for (let i = 0; i < plain.length; i++) {
+    const ch = plain[i];
     if (ch === '\n') { li++; col = 0; continue; }
-    const age = local - sched[i];
+    const age = local - (sched[i] ?? Infinity);
     if (age > 0) {
       const x = body.x + col * charW;
       const y = baseY + lh * (li + 1);
       if (ch !== ' ') {
         ctx.globalAlpha = clamp(age / CHAR_FADE, 0, 1);
-        ctx.fillStyle = C.terminal;
+        ctx.fillStyle = colors[i] || C.terminal;
         ctx.fillText(ch, x, y);
         ctx.globalAlpha = 1;
       }
@@ -2952,8 +2962,26 @@ function drawCliCard(ctx: CanvasRenderingContext2D, scene: CliScene, time: numbe
     const cmdP = done ? 1 : clamp(rawP / 0.3, 0, 1);
     const outP = done ? 1 : clamp((rawP - 0.3) / 0.6, 0, 1);
     rows.push([{ text: `${scene.cwd || '~'}`, color: cli.cwd || IDE.termCyan }, { text: ' ❯ ', color: cli.prompt || IDE.termGreen }, { text: c.command.slice(0, Math.ceil(c.command.length * cmdP)), color: panel.text }]);
-    const out = (c.output || '').slice(0, Math.ceil((c.output || '').length * outP));
-    if (out) for (const ln of out.split('\n')) rows.push([{ text: ln, color: termLineColor(ln) || cli.stdout || IDE.termOut }]);
+    const outRaw = c.output || '';
+    if (outRaw && hasAnsi(outRaw)) {
+      // recorded output: honor its real ANSI colors, revealing by plain chars
+      const lines = ansiToLines(outRaw);
+      const totalChars = lines.reduce((a, l) => a + l.reduce((b, sg) => b + sg.text.length, 0), 0);
+      let budget = Math.ceil(totalChars * outP);
+      for (const line of lines) {
+        if (budget <= 0 && outP < 1) break;
+        const segs: Seg[] = [];
+        for (const sg of line) {
+          const t = outP < 1 ? sg.text.slice(0, Math.max(0, budget)) : sg.text;
+          budget -= sg.text.length;
+          if (t) segs.push({ text: t, color: sg.color || cli.stdout || IDE.termOut });
+        }
+        rows.push(segs);
+      }
+    } else if (outRaw) {
+      const out = outRaw.slice(0, Math.ceil(outRaw.length * outP));
+      if (out) for (const ln of out.split('\n')) rows.push([{ text: ln, color: termLineColor(ln) || cli.stdout || IDE.termOut }]);
+    }
     if (!done && c.output && cmdP >= 1 && outP < 1) streaming = true;
   }
   if (streaming) { const sp = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'; rows.push([{ text: sp[Math.floor(time * 12) % sp.length], color: cli.prompt || IDE.termGreen }]); }
@@ -3515,13 +3543,16 @@ function captionPagesFor(prep: Prepared, sceneIndex: number): CaptionPage[] {
   if (hit) return hit;
   const scene = prep.dsl.scenes[sceneIndex];
   const words = prep.words?.get(sceneIndex);
+  // narrow (9:16) frames take fewer words per page so the pill fits
+  const maxChars = prep.dsl.width < prep.dsl.height ? 24 : 42;
   const pages =
     words && words.length
-      ? buildCaptionPages(words)
+      ? buildCaptionPages(words, maxChars)
       : scene.narration
         ? estimatedCaptionPages(
             scene.narration,
             Math.min(scene.narrationDuration ?? scene.duration, scene.duration),
+            maxChars,
           )
         : [];
   prep.captionPages.set(sceneIndex, pages);
@@ -3556,7 +3587,7 @@ function drawNarrationCaption(ctx: CanvasRenderingContext2D, prep: Prepared, tim
   if (!page) return;
 
   const W = dsl.width, H = dsl.height;
-  const fs = Math.round(H / 33);
+  const fs = Math.round(Math.min(H / 33, W / 24));
   ctx.save();
   ctx.font = `500 ${fs}px ${MONO}`;
   const space = ctx.measureText(' ').width;

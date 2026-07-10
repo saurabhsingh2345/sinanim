@@ -277,19 +277,32 @@ const SAMPLE = {
 };
 
 // ── CLI ─────────────────────────────────────────────────────────────────────────
+/** --shorts: vertical 1080x1920; --scenes a-b: teaser cut (repace re-times it). */
+function applyFlags(raw: any, args: string[]): any {
+  const out = { ...raw };
+  if (args.includes('--shorts')) { out.width = 1080; out.height = 1920; }
+  const si = args.indexOf('--scenes');
+  if (si >= 0 && Array.isArray(out.scenes)) {
+    const [a, b] = String(args[si + 1] || '').split('-').map((n) => parseInt(n, 10));
+    if (isFinite(a)) out.scenes = out.scenes.slice(a, isFinite(b) ? b + 1 : a + 1);
+  }
+  return out;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const voiceOn = !args.includes('--no-voice');
   const voice = args.includes('--voice') ? args[args.indexOf('--voice') + 1] : 'af_heart';
-  const positional = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--voice');
+  const flagVals = new Set([args.indexOf('--voice') + 1, args.indexOf('--scenes') + 1].filter((i) => i > 0));
+  const positional = args.filter((a, i) => !a.startsWith('--') && !flagVals.has(i));
 
   if (args.includes('--sample')) {
-    await renderOne(SAMPLE, positional[0] || 'sample.mp4', voice, voiceOn);
+    await renderOne(applyFlags(SAMPLE, args), positional[0] || 'sample.mp4', voice, voiceOn);
     return;
   }
   const [input, output] = positional;
   if (!input) {
-    console.error('usage: npx tsx scripts/render-video.mts <lesson.json | dir> <out.mp4 | out-dir> [--voice af_heart] [--no-voice]\n       npx tsx scripts/render-video.mts --sample out.mp4');
+    console.error('usage: npx tsx scripts/render-video.mts <lesson.json | dir> <out.mp4 | out-dir> [--voice af_heart] [--no-voice] [--shorts] [--scenes 0-3]\n       npx tsx scripts/render-video.mts --sample out.mp4');
     process.exit(1);
   }
   if (statSync(input).isDirectory()) {
@@ -298,10 +311,10 @@ async function main() {
     for (const f of readdirSync(input).filter((f) => f.endsWith('.json'))) {
       const name = basename(f, '.json');
       console.log(`\n=== ${name} ===`);
-      await renderOne(JSON.parse(readFileSync(join(input, f), 'utf8')), join(outDir, `${name}.mp4`), voice, voiceOn);
+      await renderOne(applyFlags(JSON.parse(readFileSync(join(input, f), 'utf8')), args), join(outDir, `${name}.mp4`), voice, voiceOn);
     }
   } else {
-    await renderOne(JSON.parse(readFileSync(input, 'utf8')), output || 'lesson.mp4', voice, voiceOn);
+    await renderOne(applyFlags(JSON.parse(readFileSync(input, 'utf8')), args), output || 'lesson.mp4', voice, voiceOn);
   }
 }
 

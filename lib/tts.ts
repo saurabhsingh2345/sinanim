@@ -76,6 +76,27 @@ export class NarrationEngine {
     return this.ttsPromise;
   }
 
+  /** Premium tiers ("oa:*" OpenAI, "el:*" ElevenLabs) proxied via /api/tts —
+   *  the server holds the keys; the browser just decodes the MP3. */
+  private async synthesizeRemote(text: string, voice: string): Promise<SynthesizedClip> {
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.error || `TTS proxy failed (${res.status})`);
+    }
+    const bytes = await res.arrayBuffer();
+    const AC = window.AudioContext || (window as any).webkitAudioContext;
+    if (!this.decodeCtx) this.decodeCtx = new AC();
+    const buf = await this.decodeCtx.decodeAudioData(bytes);
+    const samples = buf.getChannelData(0).slice();
+    return { samples, sampleRate: buf.sampleRate, duration: buf.duration };
+  }
+  private decodeCtx: AudioContext | null = null;
+
   async synthesize(
     text: string,
     voice: string,
@@ -84,6 +105,12 @@ export class NarrationEngine {
     const key = `${voice}::${text}`;
     const hit = this.cache.get(key);
     if (hit) return hit;
+
+    if (voice.startsWith('oa:') || voice.startsWith('el:')) {
+      const clip = await this.synthesizeRemote(text, voice);
+      this.cache.set(key, clip);
+      return clip;
+    }
 
     try {
       const tts = await this.load(onDownloadProgress);

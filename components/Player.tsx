@@ -163,6 +163,14 @@ export function Player({
   const hasNarration = dsl.scenes.some((s) => s.narration);
   const [voiceOn, setVoiceOn] = useState(true);
   const [voice, setVoice] = useState(dsl.voice || DEFAULT_VOICE);
+  // premium tiers (OpenAI/ElevenLabs) appear when the server has keys
+  const [voiceList, setVoiceList] = useState(VOICES);
+  useEffect(() => {
+    fetch('/api/tts')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.voices?.length) setVoiceList([...VOICES, ...d.voices]); })
+      .catch(() => {});
+  }, []);
   const [tts, setTts] = useState<TTSPhase>({ phase: 'idle' });
   const [adsl, setAdsl] = useState<AnimationDSL>(dsl);
   const narrFpRef = useRef('');
@@ -870,7 +878,7 @@ export function Player({
                 {voiceOn ? 'narration on' : 'narration off'}
               </button>
               <select className="vselect" value={voice} onChange={(e) => setVoice(e.target.value)} disabled={!voiceOn}>
-                {VOICES.map((v) => (
+                {voiceList.map((v) => (
                   <option key={v.id} value={v.id}>{v.label}</option>
                 ))}
               </select>
