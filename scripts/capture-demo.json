@@ -1,0 +1,14 @@
+{
+  "html": "<!doctype html><html><head><style>body{font-family:-apple-system,system-ui,sans-serif;margin:0;background:#fafafa;color:#111}nav{display:flex;align-items:center;gap:24px;padding:16px 40px;background:#fff;border-bottom:1px solid #eee}nav b{font-size:18px}nav a{color:#555;text-decoration:none;font-size:14px}main{max-width:760px;margin:60px auto;padding:0 24px}h1{font-size:44px;margin:0 0 12px}p.sub{color:#666;font-size:18px;margin:0 0 28px}.row{display:flex;gap:10px;margin-bottom:48px}input{flex:1;font-size:16px;padding:13px 16px;border:1.5px solid #ddd;border-radius:10px;outline:none}input:focus{border-color:#6366f1}button{font-size:15px;font-weight:600;padding:13px 22px;border:0;border-radius:10px;background:#6366f1;color:#fff;cursor:pointer}button:active{transform:scale(.97)}.cards{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}.card{background:#fff;border:1px solid #eee;border-radius:14px;padding:20px}.card h3{margin:0 0 8px;font-size:16px}.card p{margin:0;color:#666;font-size:13.5px;line-height:1.5}footer{margin:70px 0 40px;text-align:center;color:#999;font-size:13px}</style></head><body><nav><b>◆ Brewlog</b><a href='#'>Features</a><a href='#'>Pricing</a><a href='#'>Docs</a></nav><main><h1>Track every brew.</h1><p class='sub'>The coffee-logging API for people who take dialing in seriously.</p><div class='row'><input id='q' placeholder='Search the docs…'><button id='go'>Search</button></div><div class='cards'><div class='card'><h3>POST /brews</h3><p>Log a shot with dose, yield, and time. Returns the computed ratio.</p></div><div class='card'><h3>GET /brews/stats</h3><p>Rolling averages so you can see the drift before you taste it.</p></div><div class='card'><h3>Webhooks</h3><p>Push every brew to your dashboard the moment it's pulled.</p></div></div><footer>Brewlog · built for the demo lesson</footer></main></body></html>",
+  "width": 1280,
+  "height": 720,
+  "fps": 60,
+  "duration": 7,
+  "cursor": true,
+  "steps": [
+    { "at": 0.4, "kind": "move", "selector": "#q" },
+    { "at": 1.0, "kind": "type", "selector": "#q", "text": "log a brew", "cps": 13 },
+    { "at": 2.6, "kind": "click", "selector": "#go" },
+    { "at": 4.2, "kind": "scroll", "y": 260, "seconds": 1.2 }
+  ]
+}

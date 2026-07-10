@@ -10,12 +10,16 @@
 import { AnimationDSL } from './types';
 import { paceToNarration } from './dsl';
 import { DEFAULT_VOICE, NarrationEngine, SynthesizedClip, TTSPhase } from './tts';
+import { WordTiming, buildWordTimeline, SentenceClipInfo } from './word-timeline';
 
 export interface NarrationResult {
   /** The timeline re-paced so speech always fits. */
   dsl: AnimationDSL;
   /** sceneIndex -> decoded speech, ready to schedule. */
   buffers: Map<number, AudioBuffer>;
+  /** sceneIndex -> word timings (seconds relative to scene start) — the master
+   *  clock for karaoke captions, narration-paced typing and sync anchors. */
+  words: Map<number, WordTiming[]>;
 }
 
 /** Pause stitched between sentences (s) — a natural breath. */
@@ -73,6 +77,7 @@ export async function buildNarration(
 
   const buffers = new Map<number, AudioBuffer>();
   const durations = new Map<number, number>();
+  const words = new Map<number, WordTiming[]>();
 
   const total = narrated.reduce((a, n) => a + n.sentences.length, 0);
   let done = 0;
@@ -94,8 +99,18 @@ export async function buildNarration(
     buf.copyToChannel(clip.samples as any, 0);
     buffers.set(i, buf);
     durations.set(i, clip.duration);
+
+    // word timeline: sentence offsets inside the stitched clip are exact;
+    // word times within a sentence are estimated over its voiced span.
+    const infos: SentenceClipInfo[] = [];
+    let offset = 0;
+    clips.forEach((c, k) => {
+      infos.push({ text: sentences[k], offset, samples: c.samples, sampleRate: c.sampleRate });
+      offset += c.samples.length / c.sampleRate + SENTENCE_GAP;
+    });
+    words.set(i, buildWordTimeline(infos));
   }
 
   onPhase?.({ phase: 'ready' });
-  return { dsl: paceToNarration(dsl, durations), buffers };
+  return { dsl: paceToNarration(dsl, durations), buffers, words };
 }

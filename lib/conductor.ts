@@ -1,5 +1,5 @@
-import { SoundEngine } from './sounds';
-import { Prepared, bulletRevealTimes, diagramNodeTimes, quizRevealAt, vizStepTimes } from './renderer';
+import { SfxSink } from './sounds';
+import { Prepared, bulletRevealTimes, cliTypedCount, diagramNodeTimes, ideTypedCount, ideTypedCharAt, quizRevealAt, splitTypedCount, splitTypedCharAt, vizStepTimes } from './renderer';
 import { addRowAt } from './morph';
 import { revealedCount } from './timing';
 
@@ -25,7 +25,7 @@ export class Conductor {
   /** Set true in the live player: quizzes are answered, not auto-revealed. */
   interactive = false;
 
-  constructor(private engine: SoundEngine) {}
+  constructor(private engine: SfxSink) {}
 
   /** sceneIndex -> synthesized speech (from lib/narration.ts). */
   setNarration(buffers: Map<number, AudioBuffer>) {
@@ -107,6 +107,35 @@ export class Conductor {
       } else if (s.type === 'quiz' && !this.interactive) {
         const t = s.startTime + quizRevealAt(s);
         this.cue(`quiz:${i}`, time >= t && prev < t, () => this.engine.chime());
+      } else if (s.type === 'ide' || s.type === 'cli' || s.type === 'split') {
+        if (time >= s.startTime && time < s.startTime + s.duration) {
+          const count = s.type === 'ide' ? ideTypedCount(s, time) : s.type === 'cli' ? cliTypedCount(s, time) : splitTypedCount(s, time);
+          const was = s.type === 'ide' ? ideTypedCount(s, prev) : s.type === 'cli' ? cliTypedCount(s, prev) : splitTypedCount(s, prev);
+          if (count > was) {
+            typedChar =
+              s.type === 'ide' ? ideTypedCharAt(s, time)
+              : s.type === 'split' ? splitTypedCharAt(s, time)
+              : '';
+          }
+        }
+      } else if (s.type === 'browser') {
+        const window = Math.min(s.narrationDuration ?? s.duration, s.duration);
+        const clickAt = s.startTime + window * 0.78;
+        if (s.clickBlock != null) {
+          this.cue(`browser-click:${i}`, time >= clickAt && prev < clickAt, () => this.engine.click());
+        }
+        const urlDone = s.startTime + 0.85;
+        this.cue(`browser-url:${i}`, time >= urlDone && prev < urlDone, () => this.engine.whoosh(0.22));
+        // omnibox submit / page navigate whoosh mid-scene when SERP or docs land
+        const hasSearchFlow = s.blocks.some((b) => b.kind === 'search' || b.kind === 'serp' || b.kind === 'docs');
+        if (hasSearchFlow) {
+          const submitAt = s.startTime + Math.min(window * 0.45, 2.2);
+          this.cue(`browser-submit:${i}`, time >= submitAt && prev < submitAt, () => this.engine.whoosh(0.3));
+        }
+        if ((s.tabs?.length || 0) > 1) {
+          const tabAt = s.startTime + 0.35;
+          this.cue(`browser-tab:${i}`, time >= tabAt && prev < tabAt, () => this.engine.click());
+        }
       }
     });
 

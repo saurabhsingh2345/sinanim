@@ -4,6 +4,12 @@
 
 export type ScenePosition = 'top' | 'center' | 'bottom' | 'top-center';
 
+/** Named ThemePack id from lib/themes.ts, or a partial pack override. */
+export type SceneTheme = string | Record<string, unknown>;
+
+/** Transition into this scene from the previous primary card. */
+export type SceneTransition = 'none' | 'fade' | 'slide' | 'push' | 'zoom';
+
 export interface BaseScene {
   /** Seconds from the start of the video. */
   startTime: number;
@@ -13,6 +19,12 @@ export interface BaseScene {
   narration?: string;
   /** Set by the narration pipeline: seconds the synthesized speech lasts. */
   narrationDuration?: number;
+  /** ThemePack id (e.g. "nord") or partial pack override for this scene. */
+  theme?: SceneTheme;
+  /** Partial ThemePack merge on top of `theme`. */
+  style?: Record<string, unknown>;
+  /** How this primary card enters (ignored for overlays). */
+  transition?: SceneTransition;
 }
 
 export interface CodeScene extends BaseScene {
@@ -62,6 +74,9 @@ export interface HighlightScene extends BaseScene {
   startLine: number;
   endLine: number;
   color?: string;
+  /** Word anchor: the highlight fires the moment this word is spoken in the
+   *  overlaid code scene's narration (e.g. "closure"). Beats startTime. */
+  syncWord?: string;
 }
 
 export interface TitleScene extends BaseScene {
@@ -150,6 +165,8 @@ export interface DiagramScene extends BaseScene {
   title?: string;
   nodes: DiagramNode[];
   edges: DiagramEdge[];
+  /** clean (default) or sketch (RoughJS-inspired hand-drawn strokes). */
+  aesthetic?: 'clean' | 'sketch';
 }
 
 export interface QuoteScene extends BaseScene {
@@ -258,6 +275,203 @@ export interface VizScene extends BaseScene {
   steps: VizStep[];
 }
 
+// ── IDE template (flagship) ─────────────────────────────────────────────────────
+// A single full-frame scene that OWNS the moment (like a card) and plays an
+// internal sequence of steps: open/create files, type code, run terminal
+// commands. The file tree + editor tabs + integrated terminal stay on screen and
+// evolve together, paced across the (narration-stretched) scene duration. One
+// `ide` scene replaces a whole screen-recording of VS Code.
+
+export interface IdeFile {
+  /** Path with '/' separators; folders are inferred, e.g. "src/app.py". */
+  path: string;
+  /** Language for syntax highlighting (inferred from extension if omitted). */
+  language?: string;
+  /** Contents shown when the file first appears (usually "" — it gets typed). */
+  code?: string;
+}
+
+/** What a single IDE step does. */
+export type IdeAction =
+  /** Focus a file tab (the file must already exist in the tree). */
+  | { kind: 'open'; file: string }
+  /** Create a NEW file: the cursor clicks the explorer, an inline name field
+   *  types the filename, and the file pops into the tree and opens. */
+  | { kind: 'create'; file: string }
+  /** Type `code` into `file` (typewriter). Reveals only the tail that changed
+   *  from the file's previous snapshot, so successive types read as edits. */
+  | { kind: 'type'; file: string; code: string; typingSpeed?: number }
+  /** Run `command` in the integrated terminal; `output` streams in beneath it. */
+  | { kind: 'run'; command: string; output?: string }
+  /** Glow lines `startLine`..`endLine` of the active file. */
+  | { kind: 'highlight'; file?: string; startLine: number; endLine: number };
+
+export interface IdeStep {
+  /** Short on-screen caption for this step (optional). */
+  caption?: string;
+  action: IdeAction;
+  /** Optional keystroke/shortcut chip to flash for this step, e.g. "⌘S". */
+  key?: string;
+  /** Relative pacing weight for how long this step holds (default 1). */
+  weight?: number;
+}
+
+export interface IdeScene extends BaseScene {
+  type: 'ide';
+  /** Workspace name shown atop the file explorer. */
+  project?: string;
+  /** Git branch shown in the status bar (default "main"). */
+  branch?: string;
+  /** Show the File/Edit/… menu bar (default true). */
+  showMenu?: boolean;
+  /** Initial files seeding the tree (steps may add more via `open`/`type`). */
+  files: IdeFile[];
+  steps: IdeStep[];
+}
+
+// ── Terminal / CLI session template ─────────────────────────────────────────────
+// A full-screen terminal running a sequence of real commands — replaces an
+// asciinema/terminal screencast.
+export interface CliCommand {
+  /** The command typed at the prompt. */
+  command: string;
+  /** What it prints (streams in beneath). */
+  output?: string;
+  /** Relative pacing weight (default from output length). */
+  weight?: number;
+}
+export interface CliScene extends BaseScene {
+  type: 'cli';
+  /** Window title, e.g. "zsh — ~/project". */
+  title?: string;
+  /** Shown in the prompt, e.g. "~/todo-api". */
+  cwd?: string;
+  commands: CliCommand[];
+}
+
+// ── Browser / web page model (shared by browser + split templates) ───────────────
+export type BrowserBlock =
+  | { kind: 'nav'; brand: string; links?: string[] }
+  | { kind: 'hero'; heading: string; sub?: string; cta?: string }
+  | { kind: 'button'; label: string; primary?: boolean }
+  | { kind: 'card'; title: string; body?: string }
+  | { kind: 'text'; text: string }
+  | { kind: 'input'; placeholder: string; value?: string }
+  | { kind: 'image'; label?: string }
+  | { kind: 'code'; text: string }
+  /** Sanitized HTML snippet rendered as a custom page section. */
+  | { kind: 'html'; html: string }
+  /** Google-like search box (query types in). */
+  | { kind: 'search'; query: string; engine?: string }
+  /** Search engine results page. */
+  | { kind: 'serp'; results: { title: string; url: string; snippet: string }[] }
+  /** Documentation page with sidebar. */
+  | { kind: 'docs'; heading: string; body: string; sidebar?: string[]; active?: string; highlight?: string };
+
+export interface BrowserTab {
+  title: string;
+  url?: string;
+  active?: boolean;
+}
+
+export interface BrowserScene extends BaseScene {
+  type: 'browser';
+  /** Address-bar URL. */
+  url: string;
+  /** Tab title. */
+  title?: string;
+  /** Optional multi-tab strip (Chrome-like). */
+  tabs?: BrowserTab[];
+  /**
+   * Page chrome: light or dark page surface.
+   * (Scene ThemePack lives on BaseScene.theme — use pageTheme for the page itself.)
+   */
+  pageTheme?: 'light' | 'dark';
+  /** @deprecated Use pageTheme. Kept for LLM/scaffold compat. */
+  theme?: 'light' | 'dark' | SceneTheme;
+  /** Page blocks, revealed one-by-one across the (narrated) duration. */
+  blocks: BrowserBlock[];
+  /** Index of a block (button) the cursor clicks near the end (optional). */
+  clickBlock?: number;
+}
+
+// ── Split: editor + live preview ────────────────────────────────────────────────
+export interface SplitStep {
+  caption?: string;
+  /** Full code snapshot for this step (typed on the left). */
+  code: string;
+  /** The page the code produces (shown on the right). */
+  blocks: BrowserBlock[];
+  weight?: number;
+}
+export interface SplitScene extends BaseScene {
+  type: 'split';
+  language: string;
+  filename?: string;
+  url?: string;
+  pageTheme?: 'light' | 'dark';
+  /** @deprecated Use pageTheme. */
+  theme?: 'light' | 'dark' | SceneTheme;
+  steps: SplitStep[];
+}
+
+// ── Composite layout (multi-surface panes) ──────────────────────────────────────
+export type LayoutPreset = 'ide-browser' | 'cli-browser' | 'ide-only' | 'ide-cli' | 'custom';
+
+export interface LayoutRegion {
+  /** Which surface to draw in this pane. */
+  type: 'ide' | 'browser' | 'cli';
+  /** Normalized rect inside the card frame (0..1). Defaults from preset. */
+  rect?: { x: number; y: number; w: number; h: number };
+  /** Surface-specific props (subset of IdeScene / BrowserScene / CliScene). */
+  project?: string;
+  files?: IdeFile[];
+  steps?: IdeStep[];
+  url?: string;
+  title?: string;
+  pageTheme?: 'light' | 'dark';
+  blocks?: BrowserBlock[];
+  clickBlock?: number;
+  cwd?: string;
+  commands?: CliCommand[];
+}
+
+export interface LayoutScene extends BaseScene {
+  type: 'layout';
+  preset?: LayoutPreset;
+  /** Which region is "active" for camera focus (0-based). */
+  focus?: number;
+  regions: LayoutRegion[];
+}
+
+// ── API / request demo ──────────────────────────────────────────────────────────
+export interface ApiScene extends BaseScene {
+  type: 'api';
+  method: string;
+  url: string;
+  /** Optional request headers shown in the Postman-style card. */
+  headers?: Record<string, string>;
+  /** Optional query string params (merged into the displayed URL bar). */
+  query?: Record<string, string>;
+  requestBody?: string;
+  status: number;
+  statusText?: string;
+  /** Response body (JSON), typed into the response pane. */
+  response: string;
+}
+
+// ── Pull-request / diff review ──────────────────────────────────────────────────
+// A GitHub-style unified diff, reviewed top-to-bottom with the voice.
+export interface PrScene extends BaseScene {
+  type: 'pr';
+  /** PR title shown in the window bar. */
+  title?: string;
+  filename: string;
+  language?: string;
+  before: string;
+  after: string;
+}
+
 export type Scene =
   | CodeScene
   | TerminalScene
@@ -276,7 +490,30 @@ export type Scene =
   | MascotScene
   | QuizScene
   | ChallengeScene
-  | VizScene;
+  | VizScene
+  | IdeScene
+  | CliScene
+  | BrowserScene
+  | SplitScene
+  | ApiScene
+  | PrScene
+  | LayoutScene;
+
+/** Course / lesson brand kit applied as default theme accent. */
+export interface BrandKit {
+  name?: string;
+  accent?: string;
+  logoUrl?: string;
+}
+
+/** Overlay scene types that stack on top of a primary card. */
+export const OVERLAY_TYPES = new Set(['mascot', 'highlight', 'text', 'sprite', 'click']);
+
+/** Primary full-frame card types (one owns the frame at a time). */
+export const PRIMARY_CARD_TYPES = new Set([
+  'title', 'chapter', 'bullets', 'diagram', 'quote', 'bigstat', 'quiz', 'challenge', 'viz',
+  'ide', 'cli', 'browser', 'split', 'api', 'pr', 'layout',
+]);
 
 export interface AnimationDSL {
   title: string;
@@ -285,9 +522,15 @@ export interface AnimationDSL {
   width: number;
   height: number;
   backgroundColor: string;
+  /** Default ThemePack id or partial override for the whole lesson. */
+  theme?: SceneTheme;
+  /** Brand kit — accent overrides the active theme. */
+  brand?: BrandKit;
   /** Kokoro voice id for narration, e.g. "af_heart". */
   voice?: string;
   /** Burn narration subtitles into the frame (default true when narration exists). */
   captions?: boolean;
+  /** Play keystroke / UI sound effects (default true). */
+  sfx?: boolean;
   scenes: Scene[];
 }

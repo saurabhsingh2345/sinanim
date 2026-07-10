@@ -100,6 +100,27 @@ export function addRowAt(t: MorphTiming, order: number): number {
   return t.addStart + order * t.step;
 }
 
+/**
+ * Stretch a morph so the code lands WITH the voice instead of racing ahead —
+ * the "typing is fast, narration lags" fix. `target` is the seconds the
+ * content should occupy (usually most of the scene's narration window).
+ * Only ever slows down (factor ≥ 1); per-line reveal stays snappy so slow
+ * pacing reads as deliberate, not laggy.
+ */
+export function paceMorphToNarration(t: MorphTiming, target: number): MorphTiming {
+  if (!(target > t.total)) return t;
+  const factor = Math.min(target / t.total, 3.5);
+  return {
+    hold: t.hold * factor,
+    moveStart: t.moveStart * factor,
+    moveEnd: t.moveEnd * factor,
+    addStart: t.addStart * factor,
+    step: t.step * factor,
+    lineReveal: Math.min(t.lineReveal * Math.sqrt(factor), 0.55),
+    total: t.total * factor,
+  };
+}
+
 /** Visible row count at `local` seconds (drives the panel height tween). */
 export function visibleRows(plan: MorphPlan, local: number): number {
   if (plan.pureAdd) return plan.afterRows;

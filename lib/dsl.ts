@@ -1,13 +1,39 @@
-import { AnimationDSL, AnimProp, Easing, Keyframe, Scene } from './types';
+import { AnimationDSL, AnimProp, BrowserBlock, CliCommand, Easing, IdeAction, IdeFile, IdeStep, Keyframe, LayoutRegion, Scene, SceneTransition, SplitStep } from './types';
 import { clamp } from './utils';
 import { typeDuration } from './timing';
 import { diffLines } from './diff';
 import { morphTiming } from './morph';
+import { THEME_IDS, DEFAULT_THEME_ID } from './themes';
 
 const MASCOT_ACTIONS = ['wave', 'point', 'think', 'celebrate', 'shocked', 'idle'];
+const TRANSITIONS: SceneTransition[] = ['none', 'fade', 'slide', 'push', 'zoom'];
 
 const ANIM_PROPS: AnimProp[] = ['x', 'y', 'scaleX', 'scaleY', 'rotation', 'opacity'];
 const EASINGS: Easing[] = ['linear', 'easeInOut', 'easeInCubic', 'easeOutCubic', 'easeOutBack'];
+
+function normTheme(raw: any): string | Record<string, unknown> | undefined {
+  if (typeof raw === 'string') {
+    if (raw === 'light' || raw === 'dark') return undefined; // page themes, not packs
+    return THEME_IDS.includes(raw) ? raw : undefined;
+  }
+  if (raw && typeof raw === 'object') return raw as Record<string, unknown>;
+  return undefined;
+}
+
+function normTransition(raw: any): SceneTransition | undefined {
+  return TRANSITIONS.includes(raw) ? raw : undefined;
+}
+
+function sceneExtras(s: any) {
+  const theme = normTheme(s.theme);
+  const style = s.style && typeof s.style === 'object' ? s.style : undefined;
+  const transition = normTransition(s.transition);
+  return {
+    ...(theme ? { theme } : {}),
+    ...(style ? { style } : {}),
+    ...(transition ? { transition } : {}),
+  };
+}
 
 function normKeyframe(k: any): Keyframe | null {
   if (!k || !ANIM_PROPS.includes(k.prop)) return null;
@@ -19,6 +45,76 @@ function normKeyframe(k: any): Keyframe | null {
     duration: Math.max(0.01, Number(k.duration) || 0.5),
     easing: EASINGS.includes(k.easing) ? k.easing : 'easeInOut',
   };
+}
+
+/** Best-effort language id from a file extension (for IDE syntax colors). */
+export function inferLang(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  const map: Record<string, string> = {
+    py: 'python', js: 'javascript', mjs: 'javascript', cjs: 'javascript',
+    ts: 'typescript', jsx: 'jsx', tsx: 'tsx', json: 'json', html: 'html',
+    css: 'css', scss: 'css', sh: 'bash', bash: 'bash', zsh: 'bash',
+    md: 'markdown', yml: 'yaml', yaml: 'yaml', go: 'go', rs: 'rust',
+    java: 'java', kt: 'kotlin', rb: 'ruby', php: 'php', c: 'c', h: 'c',
+    cpp: 'cpp', cc: 'cpp', hpp: 'cpp', cs: 'csharp', sql: 'sql', toml: 'toml',
+  };
+  return map[ext] || 'text';
+}
+
+/** Normalize a browser page-block list (used by browser + split scenes). */
+function normBlocks(raw: any): BrowserBlock[] {
+  if (!Array.isArray(raw)) return [];
+  const out: BrowserBlock[] = [];
+  for (const b of raw.slice(0, 24)) {
+    if (!b || !b.kind) continue;
+    switch (String(b.kind)) {
+      case 'nav': out.push({ kind: 'nav', brand: String(b.brand ?? 'Brand'), links: Array.isArray(b.links) ? b.links.map(String).slice(0, 5) : undefined }); break;
+      case 'hero': out.push({ kind: 'hero', heading: String(b.heading ?? ''), sub: b.sub ? String(b.sub) : undefined, cta: b.cta ? String(b.cta) : undefined }); break;
+      case 'button': out.push({ kind: 'button', label: String(b.label ?? 'Button'), primary: b.primary !== false }); break;
+      case 'card': out.push({ kind: 'card', title: String(b.title ?? ''), body: b.body ? String(b.body) : undefined }); break;
+      case 'text': out.push({ kind: 'text', text: String(b.text ?? '') }); break;
+      case 'input': out.push({ kind: 'input', placeholder: String(b.placeholder ?? ''), value: b.value ? String(b.value) : undefined }); break;
+      case 'image': out.push({ kind: 'image', label: b.label ? String(b.label) : undefined }); break;
+      case 'code': out.push({ kind: 'code', text: String(b.text ?? '') }); break;
+      case 'html': {
+        const html = String(b.html ?? '').slice(0, 2000).replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '');
+        if (html.trim()) out.push({ kind: 'html', html });
+        break;
+      }
+      case 'search':
+        out.push({
+          kind: 'search',
+          query: String(b.query ?? ''),
+          engine: b.engine ? String(b.engine) : undefined,
+        });
+        break;
+      case 'serp': {
+        const results = Array.isArray(b.results)
+          ? b.results
+              .filter((r: any) => r && (r.title != null || r.url != null))
+              .slice(0, 8)
+              .map((r: any) => ({
+                title: String(r.title ?? 'Result'),
+                url: String(r.url ?? 'https://example.com'),
+                snippet: String(r.snippet ?? ''),
+              }))
+          : [];
+        if (results.length) out.push({ kind: 'serp', results });
+        break;
+      }
+      case 'docs':
+        out.push({
+          kind: 'docs',
+          heading: String(b.heading ?? ''),
+          body: String(b.body ?? ''),
+          sidebar: Array.isArray(b.sidebar) ? b.sidebar.map(String).slice(0, 10) : undefined,
+          active: b.active ? String(b.active) : undefined,
+          highlight: b.highlight ? String(b.highlight) : undefined,
+        });
+        break;
+    }
+  }
+  return out;
 }
 
 const DEFAULTS = {
@@ -60,6 +156,7 @@ export function normalizeDSL(raw: any): AnimationDSL {
         typeof s.narration === 'string' && s.narration.trim()
           ? s.narration.trim()
           : undefined,
+      ...sceneExtras(s),
     };
 
     switch (s.type) {
@@ -110,6 +207,7 @@ export function normalizeDSL(raw: any): AnimationDSL {
           startLine: Number(s.startLine) || 1,
           endLine: Number(s.endLine) || 1,
           color: s.color ? String(s.color) : undefined,
+          syncWord: s.syncWord ? String(s.syncWord) : undefined,
           ...base,
         };
       case 'title':
@@ -176,7 +274,14 @@ export function normalizeDSL(raw: any): AnimationDSL {
                 label: e.label ? String(e.label) : undefined,
               }))
           : [];
-        return { type: 'diagram', title: s.title ? String(s.title) : undefined, nodes, edges, ...base };
+        return {
+          type: 'diagram',
+          title: s.title ? String(s.title) : undefined,
+          nodes,
+          edges,
+          aesthetic: s.aesthetic === 'sketch' ? 'sketch' : 'clean',
+          ...base,
+        };
       }
       case 'quote':
         return {
@@ -262,6 +367,239 @@ export function normalizeDSL(raw: any): AnimationDSL {
           ...base,
         };
       }
+      case 'ide': {
+        const files: IdeFile[] = Array.isArray(s.files)
+          ? s.files
+              .filter((f: any) => f && f.path != null)
+              .map((f: any) => ({
+                path: String(f.path),
+                language: f.language ? String(f.language) : inferLang(String(f.path)),
+                code: f.code != null ? String(f.code) : '',
+              }))
+              .slice(0, 24)
+          : [];
+        const steps: IdeStep[] = Array.isArray(s.steps)
+          ? (s.steps
+              .map((st: any): IdeStep | null => {
+                const a = st && (st.action ?? st); // tolerate a flat action object
+                const kind = String(a?.kind ?? a?.type ?? '');
+                let action: IdeAction | null = null;
+                if (kind === 'open') action = { kind: 'open', file: String(a.file ?? '') };
+                else if (kind === 'create') action = { kind: 'create', file: String(a.file ?? '') };
+                else if (kind === 'type')
+                  action = {
+                    kind: 'type',
+                    file: String(a.file ?? ''),
+                    code: String(a.code ?? ''),
+                    typingSpeed: a.typingSpeed ? clamp(Number(a.typingSpeed), 4, 80) : undefined,
+                  };
+                else if (kind === 'run')
+                  action = {
+                    kind: 'run',
+                    command: String(a.command ?? ''),
+                    output: a.output != null ? String(a.output) : undefined,
+                  };
+                else if (kind === 'highlight')
+                  action = {
+                    kind: 'highlight',
+                    file: a.file ? String(a.file) : undefined,
+                    startLine: Math.max(1, Number(a.startLine) || 1),
+                    endLine: Math.max(1, Number(a.endLine) || Number(a.startLine) || 1),
+                  };
+                if (!action) return null;
+                return {
+                  caption: st.caption ? String(st.caption) : undefined,
+                  action,
+                  key: st.key ? String(st.key) : undefined,
+                  weight: st.weight ? clamp(Number(st.weight), 0.2, 5) : undefined,
+                };
+              })
+              .filter(Boolean) as IdeStep[]).slice(0, 24)
+          : [];
+        // Files touched only by steps are NOT pre-added — they pop into the tree
+        // when their step runs (a "created" file appears live). Files listed here
+        // are the project's existing files, visible from the start.
+        return {
+          type: 'ide',
+          project: s.project ? String(s.project) : undefined,
+          branch: s.branch ? String(s.branch) : undefined,
+          showMenu: s.showMenu === false ? false : undefined,
+          files,
+          steps,
+          ...base,
+        };
+      }
+      case 'cli': {
+        const commands: CliCommand[] = Array.isArray(s.commands)
+          ? s.commands
+              .filter((c: any) => c && (c.command != null))
+              .map((c: any) => ({
+                command: String(c.command ?? ''),
+                output: c.output != null ? String(c.output) : undefined,
+                weight: c.weight ? clamp(Number(c.weight), 0.2, 5) : undefined,
+              }))
+              .slice(0, 20)
+          : [];
+        return { type: 'cli', title: s.title ? String(s.title) : undefined, cwd: s.cwd ? String(s.cwd) : undefined, commands, ...base };
+      }
+      case 'browser': {
+        const pageTheme =
+          s.pageTheme === 'dark' || s.theme === 'dark'
+            ? 'dark'
+            : 'light';
+        const tabs = Array.isArray(s.tabs)
+          ? s.tabs
+              .filter((t: any) => t && t.title != null)
+              .slice(0, 8)
+              .map((t: any) => ({
+                title: String(t.title),
+                url: t.url ? String(t.url) : undefined,
+                active: !!t.active,
+              }))
+          : undefined;
+        return {
+          type: 'browser',
+          url: String(s.url ?? 'localhost:3000'),
+          title: s.title ? String(s.title) : undefined,
+          pageTheme,
+          tabs,
+          blocks: normBlocks(s.blocks),
+          clickBlock: isFinite(Number(s.clickBlock)) ? Number(s.clickBlock) : undefined,
+          ...base,
+        };
+      }
+      case 'split': {
+        const steps: SplitStep[] = Array.isArray(s.steps)
+          ? s.steps.map((st: any) => ({
+              caption: st.caption ? String(st.caption) : undefined,
+              code: String(st.code ?? ''),
+              blocks: normBlocks(st.blocks),
+              weight: st.weight ? clamp(Number(st.weight), 0.2, 5) : undefined,
+            })).slice(0, 16)
+          : [];
+        const pageTheme =
+          s.pageTheme === 'dark' || s.theme === 'dark'
+            ? 'dark'
+            : 'light';
+        return {
+          type: 'split',
+          language: String(s.language || 'html'),
+          filename: s.filename ? String(s.filename) : undefined,
+          url: s.url ? String(s.url) : undefined,
+          pageTheme,
+          steps,
+          ...base,
+        };
+      }
+      case 'layout': {
+        const regions: LayoutRegion[] = Array.isArray(s.regions)
+          ? s.regions.slice(0, 4).map((r: any): LayoutRegion => {
+              const type = r?.type === 'browser' || r?.type === 'cli' ? r.type : 'ide';
+              const region: LayoutRegion = { type };
+              if (r.rect && typeof r.rect === 'object') {
+                region.rect = {
+                  x: clamp(Number(r.rect.x) || 0, 0, 1),
+                  y: clamp(Number(r.rect.y) || 0, 0, 1),
+                  w: clamp(Number(r.rect.w) || 0.5, 0.1, 1),
+                  h: clamp(Number(r.rect.h) || 0.5, 0.1, 1),
+                };
+              }
+              if (type === 'ide') {
+                region.project = r.project ? String(r.project) : undefined;
+                region.files = Array.isArray(r.files)
+                  ? r.files.filter((f: any) => f?.path).map((f: any) => ({
+                      path: String(f.path),
+                      language: f.language ? String(f.language) : inferLang(String(f.path)),
+                      code: f.code != null ? String(f.code) : '',
+                    })).slice(0, 24)
+                  : [];
+                region.steps = Array.isArray(r.steps) ? r.steps.slice(0, 24).map((st: any) => {
+                  const a = st?.action ?? st;
+                  const kind = String(a?.kind ?? '');
+                  let action: IdeAction | null = null;
+                  if (kind === 'open') action = { kind: 'open', file: String(a.file ?? '') };
+                  else if (kind === 'create') action = { kind: 'create', file: String(a.file ?? '') };
+                  else if (kind === 'type') action = { kind: 'type', file: String(a.file ?? ''), code: String(a.code ?? '') };
+                  else if (kind === 'run') action = { kind: 'run', command: String(a.command ?? ''), output: a.output != null ? String(a.output) : undefined };
+                  else if (kind === 'highlight') action = { kind: 'highlight', startLine: Number(a.startLine) || 1, endLine: Number(a.endLine) || 1 };
+                  return action ? { caption: st.caption ? String(st.caption) : undefined, action } : null;
+                }).filter(Boolean) as IdeStep[] : [];
+              } else if (type === 'browser') {
+                region.url = String(r.url ?? 'localhost:3000');
+                region.title = r.title ? String(r.title) : undefined;
+                region.pageTheme = r.pageTheme === 'dark' || r.theme === 'dark' ? 'dark' : 'light';
+                region.blocks = normBlocks(r.blocks);
+                region.clickBlock = isFinite(Number(r.clickBlock)) ? Number(r.clickBlock) : undefined;
+              } else {
+                region.title = r.title ? String(r.title) : undefined;
+                region.cwd = r.cwd ? String(r.cwd) : undefined;
+                region.commands = Array.isArray(r.commands)
+                  ? r.commands.filter((c: any) => c?.command != null).map((c: any) => ({
+                      command: String(c.command),
+                      output: c.output != null ? String(c.output) : undefined,
+                      weight: c.weight ? clamp(Number(c.weight), 0.2, 5) : undefined,
+                    })).slice(0, 20)
+                  : [];
+              }
+              return region;
+            })
+          : [];
+        const preset = ['ide-browser', 'cli-browser', 'ide-only', 'ide-cli', 'custom'].includes(s.preset)
+          ? s.preset
+          : regions.length <= 1
+            ? 'ide-only'
+            : 'ide-browser';
+        return {
+          type: 'layout',
+          preset,
+          focus: isFinite(Number(s.focus)) ? Number(s.focus) : 0,
+          regions,
+          ...base,
+        };
+      }
+      case 'api': {
+        const headers =
+          s.headers && typeof s.headers === 'object' && !Array.isArray(s.headers)
+            ? Object.fromEntries(
+                Object.entries(s.headers as Record<string, unknown>).map(([k, v]) => [String(k), String(v)]),
+              )
+            : undefined;
+        const query =
+          s.query && typeof s.query === 'object' && !Array.isArray(s.query)
+            ? Object.fromEntries(
+                Object.entries(s.query as Record<string, unknown>).map(([k, v]) => [String(k), String(v)]),
+              )
+            : undefined;
+        return {
+          type: 'api',
+          method: String(s.method || 'GET').toUpperCase(),
+          url: String(s.url ?? '/api'),
+          headers,
+          query,
+          requestBody: s.requestBody != null ? String(s.requestBody) : undefined,
+          status: isFinite(Number(s.status)) ? Number(s.status) : 200,
+          statusText: s.statusText ? String(s.statusText) : undefined,
+          response: String(s.response ?? '{}'),
+          ...base,
+        };
+      }
+      case 'pr': {
+        const filename = String(s.filename || 'file.txt');
+        return {
+          type: 'pr',
+          title: s.title ? String(s.title) : undefined,
+          filename,
+          language: s.language ? String(s.language) : inferLang(filename),
+          before: String(s.before ?? ''),
+          after: String(s.after ?? ''),
+          ...base,
+        };
+      }
+      case 'beat':
+        // A deliberate breath after a reveal ("And the result? … nothing.").
+        // Renders as a wait, but keeps its own short default so the LLM can
+        // drop pauses without inventing durations.
+        return { type: 'wait', ...base, duration: clamp(Number(s.duration) || 0.7, 0.2, 3) };
       case 'wait':
       default:
         return { type: 'wait', ...base };
@@ -280,8 +618,18 @@ export function normalizeDSL(raw: any): AnimationDSL {
     width: Number(raw.width) || DEFAULTS.width,
     height: Number(raw.height) || DEFAULTS.height,
     backgroundColor: String(raw.backgroundColor || DEFAULTS.backgroundColor),
+    theme: normTheme(raw.theme) || DEFAULT_THEME_ID,
+    brand:
+      raw.brand && typeof raw.brand === 'object'
+        ? {
+            name: raw.brand.name ? String(raw.brand.name) : undefined,
+            accent: raw.brand.accent ? String(raw.brand.accent) : undefined,
+            logoUrl: raw.brand.logoUrl ? String(raw.brand.logoUrl) : undefined,
+          }
+        : undefined,
     voice: raw.voice ? String(raw.voice) : undefined,
     captions: raw.captions !== false,
+    sfx: raw.sfx !== false,
     scenes,
   };
 }
@@ -407,6 +755,58 @@ export function repace(dsl: AnimationDSL): AnimationDSL {
         panelStart = start;
         panelEnd = start + duration;
         cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'ide': {
+        // A full IDE walkthrough: each step needs a beat, typing/running more so.
+        // Narration (paceToNarration) stretches it further to fit the voice.
+        const start = cursor;
+        const stepTime = s.steps.reduce(
+          (a, st) => a + (st.action.kind === 'type' ? 1.7 : st.action.kind === 'run' ? 1.5 : 0.9),
+          0,
+        );
+        const duration = Math.max(s.duration, 1.2 + stepTime);
+        panelStart = start;
+        panelEnd = start + duration;
+        cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'cli': {
+        const start = cursor;
+        const t = s.commands.reduce((acc, c) => acc + 0.9 + typeDuration(c.output || '', 34), 0);
+        const duration = Math.max(s.duration, 1 + t);
+        panelStart = start; panelEnd = start + duration; cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'browser': {
+        const start = cursor;
+        const duration = Math.max(s.duration, 2 + s.blocks.length * 0.8);
+        panelStart = start; panelEnd = start + duration; cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'split': {
+        const start = cursor;
+        const duration = Math.max(s.duration, 1.5 + s.steps.length * 2.2);
+        panelStart = start; panelEnd = start + duration; cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'api': {
+        const start = cursor;
+        const duration = Math.max(s.duration, 3.5 + typeDuration(s.response || '', 50));
+        panelStart = start; panelEnd = start + duration; cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'pr': {
+        const start = cursor;
+        const rows = diffLines(s.before, s.after).length;
+        const duration = Math.max(s.duration, 2 + rows * 0.32);
+        panelStart = start; panelEnd = start + duration; cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'layout': {
+        const start = cursor;
+        const duration = Math.max(s.duration, 8);
+        panelStart = start; panelEnd = start + duration; cursor = panelEnd + SECTION_GAP;
         return { ...s, startTime: start, duration };
       }
       case 'quiz': {

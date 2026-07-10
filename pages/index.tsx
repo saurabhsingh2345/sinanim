@@ -11,10 +11,26 @@ import {
   AlertTriangle,
   Trash2,
   ArrowRight,
+  Code2,
+  Terminal,
+  Globe,
+  Columns2,
+  Webhook,
+  GitPullRequest,
+  LayoutTemplate,
+  Network,
+  FlaskConical,
+  Repeat,
+  GitBranch,
+  Search,
 } from 'lucide-react';
 import { AnimationDSL } from '@/lib/types';
+import { normalizeDSL, repace } from '@/lib/dsl';
+import { TEMPLATES } from '@/lib/scaffolds';
+import { matchGoldTemplateId } from '@/lib/recipes';
+import { runVisualQA } from '@/lib/qa';
 import { CourseOutline } from '@/lib/course';
-import { Player } from '@/components/Player';
+import { Studio } from '@/components/studio/Studio';
 import { createCourse, deleteCourse, getCourse, listCourses, courseCompletion } from '@/lib/store';
 import { allCards, dueConcepts, masteryOf } from '@/lib/mastery';
 
@@ -49,6 +65,12 @@ export default function Home() {
   const [hint, setHint] = useState('');
   const [courses, setCourses] = useState<CourseOutline[]>([]);
   const [completion, setCompletion] = useState<Record<string, number>>({});
+  const [qaNotes, setQaNotes] = useState<string[]>([]);
+
+  const applyDsl = useCallback((next: AnimationDSL, topicHint?: string) => {
+    setDsl(next);
+    setQaNotes(runVisualQA(next, topicHint || next.title || prompt));
+  }, [prompt]);
 
   useEffect(() => {
     fetch('/api/models')
@@ -104,6 +126,17 @@ export default function Home() {
     setLoading(true);
     setError('');
     try {
+      // Gold packs win over course mode — one click lands the complete lesson in Studio.
+      const goldId = matchGoldTemplateId(prompt);
+      if (goldId) {
+        const tpl = TEMPLATES.find((t) => t.id === goldId);
+        if (tpl?.ready) {
+          applyDsl(repace(normalizeDSL(tpl.build())), prompt);
+          setMode('video');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          return;
+        }
+      }
       if (mode === 'course') {
         const res = await fetch('/api/generate-course', {
           method: 'POST',
@@ -123,18 +156,30 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Generation failed');
-      setDsl(data.dsl);
+      applyDsl(data.dsl, prompt);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error');
     } finally {
-      if (mode !== 'course') setLoading(false);
-      else setLoading(false);
+      setLoading(false);
     }
   };
 
   const removeCourse = (id: string) => {
     deleteCourse(id);
     refreshShelf();
+  };
+
+  const loadTemplate = (id: string) => {
+    const tpl = TEMPLATES.find((t) => t.id === id);
+    if (!tpl || !tpl.ready) return;
+    try {
+      setError('');
+      applyDsl(repace(normalizeDSL(tpl.build())), tpl.label);
+      setMode('video');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load template');
+    }
   };
 
   const statusLabel = useMemo(() => {
@@ -156,7 +201,7 @@ export default function Home() {
           <div className="brand">
             <span className="glyph">◆</span>
             <span className="name">newani</span>
-            <span className="studio">studio</span>
+            <span className="studio">{dsl ? 'course studio' : 'studio'}</span>
           </div>
           <div className="topright">
             <div className={`status ${online ? 'on' : online === false ? 'off' : ''}`}>
@@ -178,6 +223,7 @@ export default function Home() {
           </div>
         </header>
 
+        {!dsl && (
         <main className="hero">
           <h1>
             Type a topic.<br />
@@ -232,11 +278,68 @@ export default function Home() {
               <button key={ex} className="chip" onClick={() => setPrompt(ex)}>{ex}</button>
             ))}
           </div>
+
+          <div className="templates">
+            <div className="tlabel">or start from a template — no recording, just render</div>
+            <div className="tgrid">
+              {TEMPLATES.map((t) => {
+                const Icon =
+                  t.id === 'python-loops' ? Repeat
+                  : t.id === 'web-python-docs' ? Search
+                  : t.id === 'js-array-map' ? Code2
+                  : t.id === 'git-basics' ? GitBranch
+                  : t.id === 'rest-crud' ? Webhook
+                  : t.id === 'ide' ? Code2
+                  : t.id === 'cli' ? Terminal
+                  : t.id === 'browser' ? Globe
+                  : t.id === 'split' ? Columns2
+                  : t.id === 'api' ? Webhook
+                  : t.id === 'layout' ? LayoutTemplate
+                  : t.id === 'diagram' ? Network
+                  : t.id === 'challenge' ? FlaskConical
+                  : GitPullRequest;
+                return (
+                  <button
+                    key={t.id}
+                    className={`tcard ${t.ready ? '' : 'soon'}`}
+                    onClick={() => loadTemplate(t.id)}
+                    disabled={!t.ready}
+                    title={t.ready ? 'Load this template' : 'Coming soon'}
+                  >
+                    <span className="ticon"><Icon size={18} /></span>
+                    <span className="ttext">
+                      <span className="ttitle">{t.label}{!t.ready && <em> · soon</em>}</span>
+                      <span className="tblurb">{t.blurb}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </main>
+        )}
 
         {mode === 'video' && dsl && (
-          <section className="result">
-            <Player dsl={dsl} />
+          <section className="result studio-wrap studio-focus">
+            {qaNotes.length > 0 && (
+              <ul className="home-qa">
+                {qaNotes.slice(0, 5).map((n, i) => (
+                  <li key={i}>{n}</li>
+                ))}
+              </ul>
+            )}
+            <Studio
+              dsl={dsl}
+              onChange={(next) => {
+                setDsl(next);
+                setQaNotes([]);
+              }}
+              onClose={() => {
+                setDsl(null);
+                setQaNotes([]);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+            />
           </section>
         )}
 
@@ -370,7 +473,30 @@ export default function Home() {
         }
         .chip:hover { color: var(--fg); border-color: rgba(167, 139, 250, 0.5); background: rgba(167, 139, 250, 0.06); }
 
+        .templates { margin-top: 30px; }
+        .tlabel { color: var(--dimmer); font-size: 12px; text-align: center; margin-bottom: 12px; }
+        .tgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; max-width: 900px; margin: 0 auto; }
+        .tcard {
+          display: flex; align-items: center; gap: 12px; text-align: left;
+          background: rgba(255,255,255,0.02); border: 1px solid var(--line);
+          border-radius: 14px; padding: 13px 15px; cursor: pointer; font: inherit;
+          transition: all 0.15s ease;
+        }
+        .tcard:hover:not(:disabled) { border-color: rgba(167, 139, 250, 0.55); background: rgba(167, 139, 250, 0.06); transform: translateY(-1px); }
+        .tcard.soon { opacity: 0.5; cursor: not-allowed; }
+        .ticon { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 10px; background: rgba(167,139,250,0.12); color: var(--accent, #a78bfa); }
+        .ttext { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .ttitle { color: var(--fg); font-size: 13px; font-weight: 600; }
+        .ttitle em { color: var(--dimmer); font-style: normal; font-weight: 500; }
+        .tblurb { color: var(--dim); font-size: 11.5px; line-height: 1.3; }
+
         .result { margin-top: 44px; }
+        .home-qa {
+          list-style: none; margin: 0 0 12px; padding: 10px 14px;
+          border-radius: 10px; border: 1px solid var(--line); font-size: 12.5px; color: var(--dim);
+        }
+        .home-qa li { padding: 2px 0; }
+        .home-qa li::before { content: "· "; color: var(--accent); }
 
         .review { margin-top: 56px; }
         .review h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 2px; color: var(--dim); margin-bottom: 8px; }

@@ -80,3 +80,36 @@ export function revealedCount(schedule: number[], local: number): number {
   }
   return lo;
 }
+
+/**
+ * Human-typed reveal of `full` given previous buffer `prev`.
+ * Uses typeSchedule; scales into `stepDur` when the natural duration is longer.
+ * Returns absolute character index into `full`.
+ */
+export function typedRevealIndex(
+  prev: string,
+  full: string,
+  stepLocal: number,
+  stepDur: number,
+  speed = 42,
+): number {
+  let cp = 0;
+  const lim = Math.min(prev.length, full.length);
+  while (cp < lim && prev[cp] === full[cp]) cp++;
+  const delta = full.slice(cp);
+  if (!delta.length) return full.length;
+  if (stepLocal <= 0) return cp;
+  const sched = typeSchedule(delta, Math.max(8, speed));
+  const natural = sched.length ? sched[sched.length - 1] : 0.01;
+  const fit = Math.max(stepDur * 0.88, 0.25);
+  const scale = natural > fit ? natural / fit : 1;
+  return cp + revealedCount(sched, stepLocal * scale);
+}
+
+/** Common prefix length between two strings. */
+export function commonPrefixLen(a: string, b: string): number {
+  let cp = 0;
+  const lim = Math.min(a.length, b.length);
+  while (cp < lim && a[cp] === b[cp]) cp++;
+  return cp;
+}

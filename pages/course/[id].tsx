@@ -1,12 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { ArrowLeft, Loader2, AlertTriangle, ArrowRight, GraduationCap } from 'lucide-react';
+import { ArrowLeft, Loader2, AlertTriangle, ArrowRight, GraduationCap, Pencil } from 'lucide-react';
 import { Player } from '@/components/Player';
 import { CourseSidebar } from '@/components/CourseSidebar';
+import { Studio } from '@/components/studio/Studio';
 import { flattenLessons } from '@/lib/course';
 import { getCourse, saveLessonDSL, saveProgress, StoredCourse } from '@/lib/store';
+import { AnimationDSL } from '@/lib/types';
 
 export default function CoursePage() {
   const router = useRouter();
@@ -19,6 +21,7 @@ export default function CoursePage() {
   const [error, setError] = useState('');
   const [upNext, setUpNext] = useState<{ id: string; title: string; left: number } | null>(null);
   const [stage, setStage] = useState(0);
+  const [customizing, setCustomizing] = useState(false);
 
   const LESSON_STAGES = ['scripting the lesson…', 'reviewing the code…', 'writing the voiceover…', 'polishing checkpoints…', 'almost there…'];
   useEffect(() => {
@@ -128,6 +131,59 @@ export default function CoursePage() {
 
   const doneCount = course ? Object.values(course.progress).filter((p) => p.completed).length : 0;
 
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingDsl = useRef<AnimationDSL | null>(null);
+
+  const onStudioChange = useCallback(
+    (next: AnimationDSL) => {
+      if (!course || !currentId) return;
+      pendingDsl.current = next;
+      setCourse((c) =>
+        c ? { ...c, lessons: { ...c.lessons, [currentId]: next } } : c,
+      );
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      const courseId = course.outline.id;
+      const lessonId = currentId;
+      saveTimer.current = setTimeout(() => {
+        if (pendingDsl.current) saveLessonDSL(courseId, lessonId, pendingDsl.current);
+        pendingDsl.current = null;
+      }, 300);
+    },
+    [course, currentId],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (pendingDsl.current && course && currentId) {
+        saveLessonDSL(course.outline.id, currentId, pendingDsl.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (customizing && course && currentId && dsl) {
+    return (
+      <>
+        <Head>
+          <title>{`Customize · ${current?.lesson.title || 'lesson'} — newani`}</title>
+        </Head>
+        <Studio
+          dsl={dsl}
+          onChange={onStudioChange}
+          onClose={() => {
+            if (saveTimer.current) clearTimeout(saveTimer.current);
+            if (pendingDsl.current && course && currentId) {
+              saveLessonDSL(course.outline.id, currentId, pendingDsl.current);
+              pendingDsl.current = null;
+            }
+            setCustomizing(false);
+          }}
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <Head>
@@ -175,7 +231,14 @@ export default function CoursePage() {
             <section className="stagearea">
               {current && (
                 <div className="lessonhead">
-                  <h1>{current.lesson.title}</h1>
+                  <div className="lessonhead-row">
+                    <h1>{current.lesson.title}</h1>
+                    {dsl && (
+                      <button type="button" className="customize" onClick={() => setCustomizing(true)}>
+                        <Pencil size={14} /> Customize lesson
+                      </button>
+                    )}
+                  </div>
                   {current.lesson.objective && <p>{current.lesson.objective}</p>}
                 </div>
               )}
@@ -255,7 +318,14 @@ export default function CoursePage() {
 
         .stagearea { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
         .lessonhead h1 { font-size: 19px; letter-spacing: -0.3px; }
+        .lessonhead-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
         .lessonhead p { margin-top: 6px; font-size: 13px; color: var(--dim); }
+        .customize {
+          display: inline-flex; align-items: center; gap: 7px;
+          margin-left: auto; border: 1px solid var(--line); background: transparent;
+          color: var(--fg); border-radius: 9px; padding: 7px 12px; font: inherit; font-size: 12.5px; cursor: pointer;
+        }
+        .customize:hover { border-color: var(--line-strong); }
 
         .err {
           display: flex; align-items: center; gap: 10px; font-size: 12.5px;

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, Check, Lightbulb, Loader2, Play, RotateCcw, X } from 'lucide-react';
 import { ChallengeScene } from '@/lib/types';
 import type { GradeResult } from '@/lib/grade';
+import { gradeWithPyodide, isPythonLang } from '@/lib/pyodide-grade';
 import type { MascotAction } from '@/lib/mascot';
 import { BitReaction } from './BitReaction';
 import { cx } from '@/lib/utils';
@@ -23,6 +24,7 @@ export function ChallengeCard({ scene, onPass, onSkip }: ChallengeCardProps) {
   const [showHint, setShowHint] = useState(false);
   const [showSolution, setShowSolution] = useState(false);
   const [reaction, setReaction] = useState<{ message: string; action: MascotAction; tone: 'praise' | 'nudge' | 'fix' } | null>(null);
+  const [status, setStatus] = useState('');
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   const passed = !!result?.allPass;
@@ -34,13 +36,34 @@ export function ChallengeCard({ scene, onPass, onSkip }: ChallengeCardProps) {
     if (grading) return;
     setGrading(true);
     setReaction(null);
+    setStatus('');
     try {
-      const res = await fetch('/api/grade', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language: scene.language, code, tests: scene.tests }),
-      });
-      const data: GradeResult = await res.json();
+      let data: GradeResult | null = null;
+      try {
+        const res = await fetch('/api/grade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ language: scene.language, code, tests: scene.tests }),
+        });
+        if (res.ok) {
+          const body: GradeResult = await res.json();
+          if (body.supported !== false) data = body;
+        }
+      } catch {
+        // fall through to in-browser grading
+      }
+      if (!data && isPythonLang(scene.language)) {
+        data = await gradeWithPyodide(code, scene.tests, setStatus);
+      }
+      setStatus('');
+      if (!data) {
+        setReaction({
+          message: "Couldn't run that — check your syntax and try again.",
+          action: 'think',
+          tone: 'fix',
+        });
+        return;
+      }
       setResult(data);
       const n = attempts + 1;
       setAttempts(n);
@@ -58,6 +81,7 @@ export function ChallengeCard({ scene, onPass, onSkip }: ChallengeCardProps) {
         });
       }
     } catch {
+      setStatus('');
       setReaction({ message: "Couldn't run that — check your syntax and try again.", action: 'think', tone: 'fix' });
     } finally {
       setGrading(false);
@@ -127,11 +151,12 @@ export function ChallengeCard({ scene, onPass, onSkip }: ChallengeCardProps) {
           ) : (
             <button className="check" onClick={check} disabled={grading}>
               {grading ? <Loader2 size={14} className="spin" /> : <Play size={14} fill="currentColor" />}
-              check <kbd>⌘↵</kbd>
+              {grading && status ? status : <>check <kbd>⌘↵</kbd></>}
             </button>
           )}
         </footer>
 
+        {grading && status && <p className="hint">{status}</p>}
         {showHint && scene.hint && <p className="hint">{scene.hint}</p>}
         {passed && <div className="passbanner"><Check size={16} /> all {result!.total} tests pass</div>}
       </div>

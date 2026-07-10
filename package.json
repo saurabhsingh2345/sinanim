@@ -8,11 +8,13 @@
     "start": "next start",
     "lint": "next lint",
     "render:test": "tsx scripts/render-test.mts",
-    "narration:test": "tsx scripts/narration-test.mts"
+    "narration:test": "tsx scripts/narration-test.mts",
+    "capture:browser": "tsx scripts/capture-browser.mts"
   },
   "dependencies": {
     "kokoro-js": "^1.2.1",
     "lucide-react": "^0.462.0",
+    "mp4-muxer": "^5.2.2",
     "next": "14.2.35",
     "react": "^18",
     "react-dom": "^18",
@@ -25,6 +27,7 @@
     "@types/react-dom": "^18",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
+    "playwright": "^1.61.1",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
     "tsx": "^4.23.0",

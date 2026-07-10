@@ -1,61 +1,20 @@
 import { AnimationDSL } from './types';
 import { normalizeDSL, extractJSON, repace } from './dsl';
+import { matchRecipe, recipePromptBlock } from './recipes';
+import { SPOKEN_STYLE_RULES, lintReport, lintScript } from './script-lint';
+import { GenerateOptions, chatJSON, resolveProvider } from './llm-core';
+import { LessonPlan, planLesson, planPromptBlock } from './authoring/planner';
+import { pickBetter } from './authoring/judge';
 
-// ── Providers ─────────────────────────────────────────────────────────────────
-// Groq  → FREE tier, OpenAI-compatible, very fast, runs open models (Llama 3.3).
-// OpenAI→ paid, OpenAI-compatible.
-// Ollama→ fully local, zero-key fallback so the app always works offline.
-//
-// Selection: LLM_PROVIDER env wins; otherwise auto-detect by which key exists.
-
-export type Provider = 'groq' | 'openai' | 'ollama';
-
-const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
-
-interface ProviderCfg {
-  base: string;
-  key?: string;
-  defaultModel: string;
-  label: string;
-}
-
-function cfg(p: Provider): ProviderCfg {
-  switch (p) {
-    case 'groq':
-      return {
-        base: 'https://api.groq.com/openai/v1',
-        key: process.env.GROQ_API_KEY,
-        // gpt-oss-120b writes far richer lessons than the llama models at the
-        // same (free) price; the models API still lists llama as a fallback.
-        defaultModel: process.env.LLM_MODEL || 'openai/gpt-oss-120b',
-        label: 'Groq',
-      };
-    case 'openai':
-      return {
-        base: 'https://api.openai.com/v1',
-        key: process.env.OPENAI_API_KEY,
-        // strongest widely-available default for lesson quality; overridable
-        defaultModel: process.env.LLM_MODEL || 'gpt-4o',
-        label: 'OpenAI',
-      };
-    case 'ollama':
-      return {
-        base: `${OLLAMA_HOST}/v1`,
-        defaultModel: process.env.LLM_MODEL || 'qwen3:8b',
-        label: 'Ollama (local)',
-      };
-  }
-}
-
-export function resolveProvider(): Provider {
-  const forced = process.env.LLM_PROVIDER?.toLowerCase();
-  if (forced === 'groq' || forced === 'openai' || forced === 'ollama') return forced;
-  if (process.env.GROQ_API_KEY) return 'groq';
-  if (process.env.OPENAI_API_KEY) return 'openai';
-  return 'ollama';
-}
-
-export const DEFAULT_MODEL = cfg(resolveProvider()).defaultModel;
+// Provider plumbing lives in lib/llm-core.ts; re-exported here so existing
+// imports (API routes, course.ts) keep working unchanged.
+export {
+  DEFAULT_MODEL,
+  chatJSON,
+  getProviderStatus,
+  resolveProvider,
+} from './llm-core';
+export type { GenerateOptions, Provider, ProviderStatus } from './llm-core';
 
 // ── Prompt ────────────────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `You are the author of an animated, narrated, INTERACTIVE coding lesson.
@@ -70,10 +29,18 @@ TOP-LEVEL SHAPE:
   "fps": 30,
   "width": 1920,
   "height": 1080,
-  "backgroundColor": "#0d0d0f",
+  "backgroundColor": "#0b0b10",
+  "theme": "midnight",
+  "brand": { "name": "Acme", "accent": "#a78bfa" },
   "captions": true,
   "scenes": Scene[]
 }
+
+THEME PACKS (pick one per lesson; override per scene with "theme"):
+midnight | nord | github-light | solarized | warm-studio | high-contrast
+Every scene may also set "transition": "fade"|"slide"|"push"|"zoom"|"none".
+Browser/split page surface uses "pageTheme": "light"|"dark" (separate from ThemePack "theme").
+Composite multi-surface: layout { "type":"layout", "preset":"ide-browser"|"cli-browser"|"ide-cli"|"ide-only", "focus":0, "regions":[ {"type":"ide",...}, {"type":"browser",...} ] }
 
 NARRATION (the most important part):
 - Almost every scene should have a "narration" string: 2-5 full, friendly, conversational
@@ -93,11 +60,13 @@ NARRATION (the most important part):
   would break without it, what the computer actually does.
 - Subtitles are burned in automatically from narration — do NOT duplicate narration as "text" scenes.
 - Use "text" scenes only for short punchy on-screen labels (max ~6 words), position "top-center".
+${SPOKEN_STYLE_RULES}
 
 TEACHING DEPTH (what separates a great lesson from a slideshow — all four are REQUIRED):
 1. MOTIVATE FIRST: open with a concrete, real problem the learner recognizes, not a definition.
-2. ONE COMMON MISTAKE: show the wrong (or naive) version first, run or discuss it, then morph it
-   into the fix with a "diff" scene while the narration explains exactly why the first version fails.
+2. ONE COMMON MISTAKE: show the wrong (or naive) version first inside the "ide" (type → run), then
+   fix it with a later type/run or highlight step while narration explains why the first version fails.
+   Prefer IDE steps over a separate "diff" scene for this beat.
 3. ANSWER "WHY NOT JUST...?": anticipate the obvious alternative a learner would ask about and
    address it head-on in narration (or a quiz).
 4. EXPLAIN THE WHY on every code beat: mechanism and consequences, not a readout of the syntax.
@@ -113,129 +82,89 @@ SCENE TYPES (every scene needs "startTime" and "duration" in seconds; all accept
 - quiz:     { "type":"quiz", "question":"What does f before a string do?", "options":["Formats it","Freezes it","Makes it faster"], "answerIndex":0, "explanation":"The f prefix enables inline expressions in braces.", "startTime":26, "duration":8, "narration":"Quick check before we move on." }  — interactive checkpoint: the player pauses and waits for the learner's answer. 2-4 options; distractors must be PLAUSIBLE mistakes a real learner makes; the explanation must teach, not just confirm. Include ONE quiz after each key concept.
 - challenge: { "type":"challenge", "language":"python", "prompt":"Write a function is_even(n) that returns True for even numbers.", "starterCode":"def is_even(n):\n    # your code here\n    pass", "solution":"def is_even(n):\n    return n % 2 == 0", "tests":[{"expression":"is_even(4)","expected":"True"},{"expression":"is_even(7)","expected":"False"}], "hint":"The modulo operator % gives a remainder.", "concept":"modulo / even numbers", "startTime":30, "duration":12, "narration":"Now it's your turn — give this a real go." }  — a REAL coding challenge (Python or JavaScript only): the player pauses, the learner WRITES code, and it is executed against the tests. Each test's "expression" is evaluated right after the learner's code and its printed value is compared to "expected". Rules: 2-4 tests; "expected" must be EXACTLY what printing that expression produces (e.g. Python True/False, a list like [1, 4, 9]); "starterCode" is a clear scaffold with the signature and a TODO; "solution" must actually pass every test. Include AT MOST ONE challenge, near the end, for a hands-on concept.
 - code:     { "type":"code", "language":"python", "code":"...", "title":"main.py", "startTime":3, "duration":5, "narration":"..." }  — the code lands with an animated line cascade (fast and calm, never typed out character by character), then holds while you narrate through it.
-- diff:     { "type":"diff", "language":"python", "before":"<full old snippet>", "after":"<full new snippet>", "title":"main.py", "startTime":8, "duration":6, "narration":"..." }  — MAGIC-MOVE morph: unchanged code slides into place, removed lines fade out, new lines land one by one. This is the signature visual — USE IT for every evolution of code you already showed. Never re-show a whole file as a new "code" scene.
+- diff:     { "type":"diff", "language":"python", "before":"<full old snippet>", "after":"<full new snippet>", "title":"main.py", "startTime":8, "duration":6, "narration":"..." }  — MAGIC-MOVE morph for short panel evolutions. Prefer evolving code inside an "ide" type/run sequence for full lessons; use "diff" only when a compact before→after panel is clearer than a full IDE.
 - terminal: { "type":"terminal", "output":"...", "prompt":"$ ", "typingSpeed":40, "startTime":14, "duration":3, "sound":true, "narration":"..." }
+- ide:      { "type":"ide", "project":"todo-api", "files":[{"path":"app.py","language":"python"},{"path":"models/todo.py","language":"python"}], "steps":[ {"caption":"Define the model","action":{"kind":"type","file":"models/todo.py","code":"class Todo:\n    def __init__(self, text):\n        self.text = text"}}, {"caption":"Wire the route","action":{"kind":"type","file":"app.py","code":"from flask import Flask\napp = Flask(__name__)"}}, {"caption":"Point out the route","action":{"kind":"highlight","file":"app.py","startLine":2,"endLine":2}}, {"caption":"Run it","action":{"kind":"run","command":"python app.py","output":" * Running on http://127.0.0.1:5000"}} ], "startTime":10, "duration":24, "narration":"..." }  — a FULL VS Code workspace on screen: file explorer + editor tabs + integrated terminal, all evolving. Play it with "steps" (each ~one beat, paced to the narration). Action kinds: "open" (focus/create a file tab), "type" (file + full "code" for that file — successive types on the same file read as edits, so give the WHOLE file each time), "run" (a terminal "command" + its exact "output"), "highlight" (glow lines startLine..endLine of a file). List every file a step touches in "files" (path + language; folders come from "/" in the path). USE THIS instead of separate code+terminal scenes when you want to show building a small multi-file project and running it — it replaces a screen recording of the editor. 3-8 steps; keep each file ≤ ~18 lines. Extra action "create" (a mouse cursor names a NEW file live) and optional "key" per step (a shortcut chip, e.g. "⌘S"). The camera auto-zooms to whatever each step touches, so keep steps focused. Only list a file in "files" if it already exists at the start; files first touched by "create"/"type" pop into the tree live.
+- cli:      { "type":"cli", "title":"zsh — ~/app", "cwd":"~/app", "commands":[ {"command":"npm create vite@latest my-app","output":"✔ Scaffolded ./my-app"}, {"command":"npm install","output":"added 231 packages in 3s"}, {"command":"npm run dev","output":"VITE ready\n➜ Local: http://localhost:5173/"} ], "startTime":10, "duration":16, "narration":"..." }  — a full-screen TERMINAL session: each command types at the prompt, then its output streams (errors go red, success/urls tinted). Replaces an asciinema recording. 2-6 commands; output must be realistic.
+- browser:  { "type":"browser", "url":"https://my-app.dev", "title":"My App", "pageTheme":"light", "tabs":[{"title":"My App","url":"https://my-app.dev","active":true}], "blocks":[ {"kind":"nav","brand":"◆ Acme","links":["Features","Pricing"]}, {"kind":"hero","heading":"Ship faster","sub":"One platform for building web apps.","cta":"Get started"}, {"kind":"card","title":"Fast","body":"Instant hot reload."} ], "clickBlock":1, "startTime":26, "duration":11, "narration":"..." }  — a real Chrome window (tabs, omnibox, lock, page). Block kinds: nav, hero{heading,sub,cta}, button{label,primary}, card{title,body}, text, input{placeholder,value}, image{label}, code{text}, html{html}, search{query,engine}, serp{results:[{title,url,snippet}]}, docs{heading,body,sidebar,active,highlight}. For "look up / docs / download" topics: sequence search → serp → docs (or downloads hero) with authored content — NEVER invent a live scrape. Optional "clickBlock" aims the cursor at that block. Narration must name the on-screen action ("we type the query", "we click the docs result"). 3-6 blocks per scene.
+- layout:   { "type":"layout", "preset":"ide-browser", "focus":0, "regions":[ {"type":"ide","project":"app","files":[{"path":"index.html"}],"steps":[{"action":{"kind":"type","file":"index.html","code":"<h1>Hi</h1>"}}]}, {"type":"browser","url":"localhost:3000","pageTheme":"light","blocks":[{"kind":"hero","heading":"Hi"}]} ], "startTime":20, "duration":16, "narration":"..." }  — IDE + browser (or CLI) side by side. Use when showing code and its live result together.
+- split:    { "type":"split", "language":"html", "filename":"index.html", "url":"localhost:3000", "steps":[ {"caption":"Add a heading","code":"<h1>Hello</h1>","blocks":[{"kind":"hero","heading":"Hello"}]}, {"caption":"Add a button","code":"<h1>Hello</h1>\n<button>Click me</button>","blocks":[{"kind":"hero","heading":"Hello"},{"kind":"button","label":"Click me"}]} ], "startTime":38, "duration":12, "narration":"..." }  — EDITOR on the left types the code; the LIVE PREVIEW on the right (same block kinds as browser) updates each step. Each step's "code" is the full snapshot and "blocks" is what it renders. Perfect for HTML/CSS/React front-end lessons. 2-4 steps.
+- api:      { "type":"api", "method":"POST", "url":"https://api.acme.dev/v1/todos", "requestBody":"{ \\"text\\": \\"Ship it\\" }", "status":201, "statusText":"Created", "response":"{\n  \\"id\\": 42,\n  \\"text\\": \\"Ship it\\"\n}", "startTime":50, "duration":9, "narration":"..." }  — a REST client (like Postman): the URL types, Send is pressed, then the JSON "response" streams under a colored status badge. Use to show an API call and its result. Method one of GET/POST/PUT/DELETE/PATCH.
+- pr:       { "type":"pr", "title":"Add input validation", "filename":"auth.py", "language":"python", "before":"<full old file>", "after":"<full new file>", "startTime":50, "duration":12, "narration":"..." }  — a GitHub-style DIFF review: added lines are green, removed lines red, with old/new line numbers and a "+N −M" header, revealed top-to-bottom with the voice. Use to review a change, teach a refactor, or show a bug fix. "before"/"after" are the COMPLETE file contents.
 - text:     { "type":"text", "content":"short label", "position":"top-center", "fadeIn":0.4, "fadeOut":0.4, "startTime":2, "duration":4 }
 - click:    { "type":"click", "button":"Run", "startTime":5.5, "duration":0.5, "sound":true }
 - wait:     { "type":"wait", "startTime":5, "duration":1, "narration":"..." }  — a beat of pure voiceover.
-- highlight:{ "type":"highlight", "startLine":2, "endLine":3, "startTime":6, "duration":2 }  — dims everything but those lines of the current code panel and the camera dives in. Use while narration walks through specific lines.
+- highlight:{ "type":"highlight", "startLine":2, "endLine":3, "syncWord":"return", "startTime":6, "duration":2 }  — dims everything but those lines of the current code panel and the camera dives in. Use while narration walks through specific lines. "syncWord" (optional but PREFERRED) anchors the highlight to the exact moment that word is spoken in the code scene's narration — pick a distinctive word from the sentence that discusses those lines.
 - mascot:   { "type":"mascot", "action":"point", "line":3, "side":"right", "startTime":6, "duration":3, "narration":"..." }  — Bit, the little studio robot, appears beside the current code panel and ACTS. Actions: "wave" (greets — good on the title card), "point" (extends an arm at "line" N of the visible code while you explain it), "think" (puzzled — good right before revealing a gotcha), "celebrate" (jumps with confetti — after a successful run), "shocked" (recoils — when code errors or the naive version fails). Place 2-4 mascot scenes per lesson at MEANINGFUL moments, overlapping the code scene they refer to. Never random.
 - sprite:   { "type":"sprite", "template":"boy", "x":0.5, "y":0.72, "scale":1, "props":{"color":"#22d3ee"}, "animations":[Keyframe], "startTime":0, "duration":4 }
 
-LESSON STRUCTURE (follow unless the request clearly isn't a tutorial):
-1. "title" card introducing the topic (narrated welcome; a mascot "wave" is nice here).
-2. "bullets" card: the concrete problem this lesson solves + what you'll build (2-4 items).
-3. "code" scene with the first version (narrated reasoning). Often the NAIVE version — see depth rule 2.
-4. "highlight" + "mascot" point + "wait" while the narration walks through the key lines.
-5. "click" Run, then "terminal" showing real output (narrated). Mascot "celebrate" or "shocked" as fits.
-6. One or more "diff" scenes evolving the code, each narrating WHY, followed by a run/terminal when it helps.
-7. A "quiz" checkpoint after each key concept (at least one per lesson). For a hands-on coding lesson (Python/JS), optionally ONE "challenge" near the end where the learner writes a small function that's tested for real.
-8. Use "chapter" cards to divide longer lessons into sections; use "diagram" when an architecture or flow is easier shown than told. When the lesson is about an ALGORITHM or DATA STRUCTURE (sorting, searching, loops that build a value, recursion), include a "viz" scene that animates the steps — it teaches the idea far better than the code alone.
-9. Closing "bullets" recap (what was learned + the why) or "title" outro card.
-
-SPRITE SCENES (for real-world / character animation, NOT code):
-- "template" is one of: boy, ball, cloud, sun, star, ground.
-- "x" and "y" are the base position as FRACTIONS of the frame (0..1). x:0.5 is center, y:0 is top, y:1 is bottom.
-- boy and ground are anchored at their FEET (their bottom); ball, cloud, sun, star are anchored at their CENTER. Put a character on the floor around y:0.7-0.8.
-- "scale" multiplies natural size (1 = natural). "props.color" recolors most templates.
-- "animations" is a list of keyframes. Each keyframe:
-    { "prop":"y", "from":0.72, "to":0.4, "start":0, "duration":0.4, "easing":"easeOutCubic" }
-  where "prop" is one of x, y, scaleX, scaleY, rotation, opacity.
-  - x/y are absolute fractions (0..1). scaleX/scaleY are multipliers of scale. rotation is DEGREES. opacity is 0..1.
-  - "start"/"duration" are seconds RELATIVE to the scene's own startTime.
-  - "easing" is one of linear, easeInOut, easeOutCubic (fast then slow — use for going UP), easeInCubic (slow then fast — use for FALLING), easeOutBack.
-  - Keyframes on the same prop apply in order; a later one that has started overrides the earlier one — chain them for multi-step motion.
-- AUTOMATIC (do NOT keyframe these yourself): squash & stretch, a ground contact shadow, and the character's limbs (legs tuck at the apex, arms swing up) are all applied automatically from motion. Just keyframe the POSITION (y, and x if it moves sideways) and the motion will look alive.
-- A JUMP = a y keyframe up (easeOutCubic) then a y keyframe down (easeInCubic) for a natural gravity arc, e.g.:
-    [ {"prop":"y","from":0.75,"to":0.4,"start":0,"duration":0.4,"easing":"easeOutCubic"},
-      {"prop":"y","from":0.4,"to":0.75,"start":0.4,"duration":0.4,"easing":"easeInCubic"} ]
-  Keep a single jump snappy (~0.8s total). A bounce = several jumps in a row, each a bit lower. A hop across = also add an x keyframe.
-- Compose scenes: e.g. a "ground" sprite for the whole video + a "boy" that jumps + optional "cloud"/"sun" in the sky (y:0.15-0.3).
-- Use sprite scenes when the request is about people, objects, or physical actions (jumping, bouncing, flying). Use code/terminal scenes only for programming content.
+LESSON STRUCTURE (DEFAULT — prefer this for coding topics):
+1. "title" card introducing the topic.
+2. "bullets" card: what you will learn / the concrete problem (2-4 items).
+3. "ide" scene — the FLAGSHIP teaching surface. Build the example in a real VS Code workspace with steps that type code AND at least one "run" step with realistic output. Prefer "ide" over separate "code"+"terminal" panels.
+4. For loops / algorithms / accumulators: a "viz" scene that animates the idea (pointers, vars, array steps).
+5. Optional "api" scene when teaching HTTP/REST/Flask endpoints (Postman-style).
+6. A "quiz" checkpoint after the key concept.
+7. For Python/JS hands-on topics: ONE "challenge" near the end.
+8. Closing "bullets" recap.
+9. Use "chapter"/"diagram"/"cli"/"browser"/"split"/"layout" when the topic needs those surfaces.
+Legacy "code"/"diff"/"terminal" are allowed only when a short panel morph is clearer than a full IDE — never as the default for "teach X".
 
 RULES:
 - Durations are rough; the engine re-paces everything and stretches scenes to fit the voice.
-- Sequence scenes with small gaps. A "click" on Run should come AFTER a code/diff scene and BEFORE terminal output.
-- Target 60-120 seconds of content (10-18 scenes). Cover the topic PROPERLY — depth beats brevity.
-- Use real, correct, runnable code for the requested language. Terminal output must match what the code actually prints, character for character.
-- SELF-CONTAINED: any "code" or "diff" scene that is followed by a "terminal" must be a COMPLETE program that runs on its own — define everything it uses AND include the call/print that produces the shown output. Never show a fragment (a call without its definition) right before a terminal; the code on screen must actually produce that terminal output when run.
-- Keep snippets ≤ 16 lines so they fit the panel; evolve them with diffs instead of growing one giant file.
-- In "diff" scenes, "before" and "after" are each the COMPLETE snippet, and "before" must exactly equal the code the viewer is currently looking at.
-- "backgroundColor" must be "#0b0b10". fps 30, width 1920, height 1080.
+- Target a COMPLETE lesson: typically 7-14 scenes, 2-4 minutes of spoken content. Depth beats a thin trailer.
+- Prefer "ide" with a "run" step for coding demos. IDE run "output" must match what the file would print.
+- Use real, correct, runnable code. Keep each typed file ≤ ~18 lines.
+- SELF-CONTAINED: any runnable snippet (ide type/run or code+terminal) must be a COMPLETE program.
+- In "diff" scenes, "before" must exactly equal the code currently on screen.
+- SCREEN LOCK: IDE/browser narration must describe exactly what is on screen at that beat — captions and voice agree ("we type range one to five", "we click Downloads"). Do not narrate syntax symbols the learner cannot see; describe the action.
+- When the prompt says look up / docs / download: use authored browser scenes (search → serp → docs), never live web fetch.
+- "backgroundColor" should match the theme (midnight → "#0b0b10"). Set top-level "theme" to one of the ThemePack ids. fps 30, width 1920, height 1080.
 - Output ONLY the JSON object. No markdown, no commentary.`;
 
 // ── Critic pass ─────────────────────────────────────────────────────────────────
-// A second, cheap LLM round-trip that reviews the draft lesson like a ruthless
-// technical editor. It catches wrong code, broken diff chains, shallow
-// narration, and weak quizzes — the difference between "generated" and "taught".
 const CRITIC_PROMPT = `Now act as a ruthless technical editor. You will receive the animation-timeline
 JSON you are reviewing. Return the FULL improved JSON in the exact same schema — no commentary.
 
 REVIEW CHECKLIST, in priority order:
-1. CODE CORRECTNESS: every snippet must be real, runnable and idiomatic. Fix bugs. Every
-   "terminal" output must be exactly what the preceding code prints. Any code/diff scene
-   before a terminal must be SELF-CONTAINED (defines everything it uses + the printing call),
-   so it runs on its own and actually produces that output — never a fragment.
-2. DIFF INTEGRITY: every "diff".before must EXACTLY equal the code currently on screen (the
-   previous "code".code or "diff".after). Repair the chain if broken.
-3. COMPLETENESS: the lesson must (a) open with a concrete motivation, (b) contain one
-   common-mistake or naive-version diff with narration explaining why it fails, (c) answer one
-   "why not just...?" alternative, (d) contain AT LEAST ONE quiz checkpoint after a key
-   concept, and (e) close with a recap (bullets). ADD any of these that are missing.
-4. NARRATION: every title/bullets/code/diff/quiz/diagram scene needs AT LEAST 2 full sentences
-   (30-70 spoken words) of substance — EXPAND thin narration ("Quick check", "It's more
-   concise", "Let's run it" are failures: rewrite them with the actual reasoning). The whole
-   lesson should total 350+ spoken words. Keep individual sentences under ~22 words, but never
-   cut content to get there. Conversational, reasoning not play-by-play, no raw code symbols,
-   no filler ("as you can see", "simply", "just").
-5. QUIZ: exactly one defensible correct answer, plausible distractors, teaching explanation.
-6. MASCOT: actions must land on meaningful beats (point while explaining, shocked on failure,
-   celebrate on success). Fix "line" numbers that don't match the visible code.
+1. CODE CORRECTNESS: every snippet must be real and runnable. Every ide "run" output and
+   "terminal" output must match what the code would print. IDE type steps must leave a
+   COMPLETE runnable file before a run step.
+2. IDE-FIRST: coding lessons should use "ide" (with a run step) rather than bare code+terminal
+   panels. Convert thin code/terminal pairs into one ide scene when clearer.
+3. COMPLETENESS: open with motivation (title/bullets), teach in ide, include AT LEAST ONE quiz,
+   close with a bullets recap. For loops/algorithms include a "viz". For API/HTTP topics include
+   an "api" scene. For Python/JS hands-on topics include ONE "challenge".
+4. MISTAKE BEAT: prefer showing the naive version as an ide type→run step, then the fix — not a
+   mandatory standalone "diff" scene.
+5. NARRATION: every title/bullets/ide/cli/browser/viz/quiz/diagram/challenge scene needs AT LEAST 2 full
+   sentences (30-70 spoken words). Expand thin narration. Whole lesson 350+ spoken words.
+   For ide/browser: narration must match on-screen action (typed code, clicked CTA, SERP result).
+6. QUIZ: one correct answer, plausible distractors, teaching explanation.
+7. Keep ≤ 16 scenes. Return ONLY the improved JSON object.`;
 
-You are an ENRICHING editor: fix, expand and ADD freely, but only remove a scene when it is
-factually wrong or duplicated. The improved lesson must never teach LESS than the draft.
-Keep it to ≤ 20 scenes. Return ONLY the improved JSON object.`;
-
-// A dedicated pass that ONLY rewrites narration. Models reliably under-write
-// voiceover when juggling the whole timeline; given the single job of "speak
-// like a great tutor", they deliver. Everything else in the JSON is untouched.
+// A dedicated pass that ONLY rewrites narration.
 const NARRATION_PROMPT = `You will receive an animation-timeline JSON for a narrated coding lesson.
 Rewrite ONLY the "narration" fields — change NOTHING else (no scene edits, no reordering, no
 timing changes, keep every other field byte-identical). Return the FULL JSON.
 
-For every title, bullets, code, diff, quiz and diagram scene, write the voiceover a warm,
-sharp human tutor would actually say over that moment: 2-5 sentences, 30-80 spoken words.
+For every title, bullets, ide, cli, browser, viz, quiz, diagram, challenge, code, and diff scene, write
+the voiceover a warm, sharp human tutor would actually say: 2-5 sentences, 30-80 spoken words.
 - Explain the REASONING: why this code, what breaks without it, what the machine really does.
-- On the naive version, foreshadow the problem. On the fix, contrast it with what it replaced.
-- On quizzes, frame the stakes of the question without giving the answer away.
+- On IDE/browser scenes: describe exactly what is on screen (typed lines, clicked button, search query, docs section) — captions and voice must agree.
+- On quizzes, frame the stakes without giving the answer away.
 - On recaps, connect what was learned back to the opening problem.
-- Plain speech only: no code symbols, say things the way you'd SAY them. Each sentence under
-  ~22 words. No filler ("as you can see", "simply", "just", "basically").
-Short scenes (click, wait, terminal, mascot, text, highlight) may keep one good sentence.
+- Plain speech only: no code symbols. Each sentence under ~22 words. No filler.
+Short scenes (click, wait, terminal, mascot, text, highlight, api, pr) may keep 1-3 good sentences.
+${SPOKEN_STYLE_RULES}
 Return ONLY the JSON object.`;
 
-export interface GenerateOptions {
-  model?: string;
-  signal?: AbortSignal;
-}
-
-/** Low-level: one system+user round-trip that must return JSON. Used by the
- *  lesson pipeline here and by the course-outline API. */
-export async function chatJSON(
-  system: string,
-  user: string,
-  opts: GenerateOptions = {},
-): Promise<string> {
-  const provider = resolveProvider();
-  const c = cfg(provider);
-  const model = opts.model || c.defaultModel;
-  const content =
-    provider === 'ollama'
-      ? await callOllama(model, system, user, opts.signal)
-      : await callOpenAICompatible(c, model, system, user, opts.signal);
-  if (!content) throw new Error(`Empty response from ${c.label}`);
-  return content;
-}
+// Targeted fix pass: rewrites ONLY the narration sentences the lint flagged.
+const LINT_FIX_PROMPT = `You will receive an animation-timeline JSON and a lint report listing
+narration problems. Rewrite ONLY the narration fields of the flagged scenes to fix every issue —
+keep the meaning, keep everything else in the JSON byte-identical (scenes, order, timing, code).
+${SPOKEN_STYLE_RULES}
+Return ONLY the full JSON object.`;
 
 /** Critic pass runs on hosted providers; local Ollama stays single-pass (speed).
  *  Set LLM_DEEP=0 to skip everywhere, LLM_DEEP=1 to force it on. */
@@ -247,15 +176,21 @@ function criticEnabled(): boolean {
 
 /** Parse a model response into a DSL, retrying the call if the JSON is
  *  malformed or truncated (reasoning models occasionally cut off). */
-async function draftDSL(prompt: string, opts: GenerateOptions): Promise<AnimationDSL> {
+async function draftDSL(
+  prompt: string,
+  opts: GenerateOptions,
+  plan?: LessonPlan,
+): Promise<AnimationDSL> {
+  const recipe = matchRecipe(prompt);
+  const user = [
+    `Create an animation timeline for: ${prompt}`,
+    '',
+    plan ? planPromptBlock(plan) : recipePromptBlock(recipe),
+  ].join('\n');
   let lastErr: unknown;
   for (let tries = 0; tries < 3; tries++) {
     try {
-      const content = await chatJSON(
-        SYSTEM_PROMPT,
-        `Create an animation timeline for: ${prompt}`,
-        opts,
-      );
+      const content = await chatJSON(SYSTEM_PROMPT, user, opts);
       return normalizeDSL(JSON.parse(extractJSON(content)));
     } catch (e) {
       lastErr = e;
@@ -268,7 +203,19 @@ export async function generateDSL(
   prompt: string,
   opts: GenerateOptions = {},
 ): Promise<AnimationDSL> {
-  let dsl = await draftDSL(prompt, opts);
+  // ── Plan first (hosted providers): concept DAG, persona, running example,
+  // beat sheet. This is where story and specificity come from; the writer is
+  // then conditioned on the plan as a contract. Fail-soft: no plan, no problem.
+  let plan: LessonPlan | undefined;
+  if (criticEnabled()) {
+    try {
+      plan = await planLesson(prompt, opts);
+    } catch {
+      // recipes still steer the draft
+    }
+  }
+
+  let dsl = await draftDSL(prompt, opts, plan);
 
   if (criticEnabled()) {
     try {
@@ -277,14 +224,26 @@ export async function generateDSL(
         `${CRITIC_PROMPT}\n\nThe lesson request was: ${prompt}\n\nJSON to review:\n${JSON.stringify(dsl)}`,
         opts,
       );
-      dsl = normalizeDSL(JSON.parse(extractJSON(improved)));
+      const revision = normalizeDSL(JSON.parse(extractJSON(improved)));
+      // Refine-n-Judge: models prefer their own rewrites even when worse, so
+      // the revision must beat the draft on a fixed checklist to be accepted.
+      dsl = (await pickBetter(dsl, revision, opts)).dsl;
     } catch {
       // the draft is already valid — never let the editor pass break generation
     }
 
-    // structural guarantees the prompts alone can't be trusted with: every
-    // lesson ships with a quiz checkpoint and a recap. Repair only if missing.
+    // structural guarantees the prompts alone can't be trusted with.
     const missing: string[] = [];
+    const hasIdeRun = dsl.scenes.some(
+      (s) => s.type === 'ide' && s.steps.some((st) => st.action.kind === 'run'),
+    );
+    const hasCodeTerminal =
+      dsl.scenes.some((s) => s.type === 'code') && dsl.scenes.some((s) => s.type === 'terminal');
+    if (!hasIdeRun && !hasCodeTerminal) {
+      missing.push(
+        'an "ide" scene with at least one "run" step (realistic output) that teaches the core concept — prefer ide over bare code+terminal',
+      );
+    }
     if (!dsl.scenes.some((s) => s.type === 'quiz')) {
       missing.push(
         'exactly ONE "quiz" scene placed right after the most important concept (plausible distractors, teaching explanation, 2+ sentence narration framing the stakes)',
@@ -296,12 +255,23 @@ export async function generateDSL(
         'a closing "bullets" recap scene connecting what was learned back to the opening problem',
       );
     }
-    // algorithm / data-structure topics teach far better when the steps are
-    // animated — guarantee a viz scene for them (the model often forgets).
     const algoRe = /\b(sort|search|recursi\w*|stack|queue|tree|linked list|binary|traver\w*|iterat\w*|\bloop\b|pointer|hash\w*|fibonacci|factorial|bfs|dfs|graph|algorithm|big o|complexity|two pointer|sliding window)\b/i;
     if (algoRe.test(prompt) && !dsl.scenes.some((s) => s.type === 'viz')) {
       missing.push(
         'a "viz" scene that ANIMATES this algorithm step by step — 4-7 steps, each a full state with a caption, using array cells with highlight/compare/done indices, walking pointers ([{name,index}]), an accumulator in vars, and/or a call stack for recursion',
+      );
+    }
+    if (/\b(api|rest|http|flask|express|endpoint|postman)\b/i.test(prompt) && !dsl.scenes.some((s) => s.type === 'api')) {
+      missing.push(
+        'an "api" scene (Postman-style) showing method, URL, and response for the HTTP concept being taught',
+      );
+    }
+    if (
+      /\b(python|javascript|typescript|js\b|coding|function|loop|algorithm)\b/i.test(prompt) &&
+      !dsl.scenes.some((s) => s.type === 'challenge')
+    ) {
+      missing.push(
+        'ONE "challenge" near the end (Python or JavaScript): starterCode, solution that passes tests, 2-4 tests with exact expected stdout, and 2+ sentence narration',
       );
     }
     if (missing.length) {
@@ -338,6 +308,29 @@ export async function generateDSL(
     } catch {
       // narration stays as-is
     }
+
+    // Script lint: catch AI-slop phrases, robotic rhythm, and spoken-symbol
+    // problems, then request a TARGETED rewrite of just the flagged sentences.
+    const issues = lintScript(dsl);
+    if (issues.length) {
+      try {
+        const fixed = await chatJSON(
+          SYSTEM_PROMPT,
+          `${LINT_FIX_PROMPT}\n\nLINT REPORT:\n${lintReport(issues)}\n\nJSON:\n${JSON.stringify(dsl)}`,
+          opts,
+        );
+        const clean = normalizeDSL(JSON.parse(extractJSON(fixed)));
+        if (
+          clean.scenes.length === dsl.scenes.length &&
+          clean.scenes.every((s, i) => s.type === dsl.scenes[i].type) &&
+          lintScript(clean).length < issues.length
+        ) {
+          dsl = clean;
+        }
+      } catch {
+        // lint is advisory — never block generation
+      }
+    }
   }
 
   // LEAP 1 — execution grounding: actually run every snippet and replace terminal
@@ -355,226 +348,30 @@ export async function generateDSL(
       // grounding unavailable (no runtime) — ship the model's output as-is
     }
   }
+
+  // Structural visual QA (logged; creators also get this in the Studio UI)
+  try {
+    const { runVisualQA } = await import('./qa');
+    const notes = runVisualQA(dsl);
+    if (notes.length && !notes[0].startsWith('QA passed')) {
+      console.log('[qa]', notes.join(' | '));
+    }
+  } catch {
+    // ignore
+  }
+
+  // Vision QA (opt-in, LLM_VISION_QA=1): render keyframes headlessly and have a
+  // vision model flag visual defects (clipped text, overlap, dead space).
+  if (process.env.LLM_VISION_QA === '1' && typeof window === 'undefined') {
+    try {
+      const { visionQA } = await import('./authoring/vision-qa');
+      const notes = await visionQA(dsl);
+      if (notes.length) console.log('[vision-qa]', notes.join(' | '));
+    } catch {
+      // advisory only
+    }
+  }
+
   return repace(dsl);
 }
 
-// ── OpenAI-compatible (Groq / OpenAI) ───────────────────────────────────────────
-async function callOpenAICompatible(
-  c: ProviderCfg,
-  model: string,
-  system: string,
-  user: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  if (!c.key) {
-    throw new Error(
-      `${c.label} API key is missing. Add it to .env.local (get a free Groq key at https://console.groq.com/keys).`,
-    );
-  }
-
-  // Model-capability quirks we adapt to on the fly (newer OpenAI reasoning
-  // models reject max_tokens and non-default temperature; some reject JSON mode).
-  // `budget` is the completion size; it shrinks if a tier rejects the request as
-  // too large (free Groq caps prompt+completion at 8000 tokens/minute).
-  // `model` can change if the client sent an id from a different provider.
-  const caps = { jsonMode: true, maxTokens: true, temperature: true, budget: 8000, model };
-
-  const attempt = async (): Promise<{ ok: true; content: string } | { ok: false; status: number; body: string }> => {
-    const body: Record<string, any> = {
-      model: caps.model,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-    };
-    if (caps.temperature) body.temperature = 0.4;
-    // room for a full lesson; the param name differs on reasoning models
-    if (caps.maxTokens) body.max_tokens = caps.budget;
-    else body.max_completion_tokens = caps.budget;
-    if (caps.jsonMode) body.response_format = { type: 'json_object' };
-
-    const res = await fetch(`${c.base}/chat/completions`, {
-      method: 'POST',
-      signal,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${c.key}` },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      return { ok: false, status: res.status, body: txt };
-    }
-    const data = await res.json();
-    return { ok: true, content: data?.choices?.[0]?.message?.content ?? '' };
-  };
-
-  let r = await attempt();
-  // adapt to a rejected parameter / oversized / unknown-model request and retry
-  // (OpenAI answers 400 for bad params, 413 for oversize, 404 for a bad model)
-  for (let fix = 0; !r.ok && (r.status === 400 || r.status === 413 || r.status === 404) && fix < 5; fix++) {
-    const b = r.body.toLowerCase();
-    if (b.includes('json_validate_failed') || (b.includes('response_format') && caps.jsonMode)) {
-      caps.jsonMode = false; // extractJSON copes with free-form output
-    } else if (b.includes('max_tokens') && caps.maxTokens) {
-      caps.maxTokens = false; // → max_completion_tokens
-    } else if (b.includes('temperature') && caps.temperature) {
-      caps.temperature = false; // reasoning models allow only the default
-    } else if (r.status === 413 || b.includes('request too large') || b.includes('reduce')) {
-      // shrink the completion budget to fit a small per-minute token cap
-      const limit = b.match(/limit (\d+)/)?.[1];
-      const promptEst = Math.ceil((system.length + user.length) / 3.5);
-      caps.budget = Math.max(1200, (limit ? parseInt(limit) : caps.budget) - promptEst - 300);
-    } else if ((b.includes('invalid model') || b.includes('model_not_found') || b.includes('does not exist')) && caps.model !== c.defaultModel) {
-      // the caller passed a model from another provider (stale UI selection) —
-      // fall back to this provider's known-good default instead of failing
-      caps.model = c.defaultModel;
-    } else break;
-    r = await attempt();
-  }
-  // rate limits / transient upstream errors: back off and retry, honoring the
-  // provider's own "try again in Xs" hint (free Groq tier is TPM-limited).
-  for (let tries = 0; !r.ok && (r.status === 429 || r.status >= 500) && tries < 4; tries++) {
-    const hint = r.body.match(/try again in ([\d.]+)s/i);
-    const waitMs = hint ? Math.ceil(parseFloat(hint[1]) * 1000) + 400 : 1500 * (tries + 1);
-    await new Promise((res2) => setTimeout(res2, Math.min(waitMs, 12000)));
-    r = await attempt();
-  }
-  if (!r.ok) throw new Error(`${c.label} request failed (${r.status}). ${r.body}`);
-  return r.content;
-}
-
-// ── Ollama (local, native API) ───────────────────────────────────────────────────
-async function callOllama(
-  model: string,
-  system: string,
-  user: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal,
-    body: JSON.stringify({
-      model,
-      stream: false,
-      format: 'json',
-      think: false,
-      options: { temperature: 0.4, num_ctx: 8192 },
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(
-      `Ollama request failed (${res.status}). Is \`ollama serve\` running and "${model}" pulled? ${body}`,
-    );
-  }
-  const data = await res.json();
-  return data?.message?.content ?? '';
-}
-
-// ── Model listing / status ────────────────────────────────────────────────────────
-export interface ProviderStatus {
-  provider: Provider;
-  label: string;
-  online: boolean;
-  models: string[];
-  default: string;
-  hint?: string;
-}
-
-export async function getProviderStatus(): Promise<ProviderStatus> {
-  const provider = resolveProvider();
-  const c = cfg(provider);
-
-  if (provider === 'ollama') {
-    const models = await listOllamaModels();
-    return {
-      provider,
-      label: c.label,
-      online: models.length > 0,
-      models,
-      default: models.includes(c.defaultModel) ? c.defaultModel : models[0] || c.defaultModel,
-      hint: models.length
-        ? undefined
-        : 'Ollama isn\'t reachable. Run `ollama serve` and `ollama pull qwen3:8b`, or add a free GROQ_API_KEY to .env.local.',
-    };
-  }
-
-  if (!c.key) {
-    return {
-      provider,
-      label: c.label,
-      online: false,
-      models: [c.defaultModel],
-      default: c.defaultModel,
-      hint:
-        provider === 'groq'
-          ? 'Add a free GROQ_API_KEY to .env.local (get one at console.groq.com/keys), then restart.'
-          : 'Add your OPENAI_API_KEY to .env.local, then restart.',
-    };
-  }
-
-  const models = await listOpenAICompatibleModels(c);
-  return {
-    provider,
-    label: c.label,
-    online: true,
-    models: models.length ? models : [c.defaultModel],
-    default: models.includes(c.defaultModel) ? c.defaultModel : c.defaultModel,
-  };
-}
-
-async function listOllamaModels(): Promise<string[]> {
-  try {
-    const res = await fetch(`${OLLAMA_HOST}/api/tags`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data?.models ?? []).map((m: any) => m.name).filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-// A curated shortlist of good free/cheap JSON-capable chat models per provider,
-// filtered against what the account actually has access to.
-const PREFERRED: Record<string, string[]> = {
-  groq: [
-    'llama-3.3-70b-versatile',
-    'llama-3.1-8b-instant',
-    'openai/gpt-oss-120b',
-    'openai/gpt-oss-20b',
-    'qwen/qwen3-32b',
-    'moonshotai/kimi-k2-instruct',
-  ],
-  // gpt-4o first: fast enough for a snappy multi-pass author and excellent
-  // quality. Stronger (slower) reasoning models follow for when you want them.
-  openai: ['gpt-4o', 'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o-mini'],
-};
-
-async function listOpenAICompatibleModels(c: ProviderCfg): Promise<string[]> {
-  try {
-    const res = await fetch(`${c.base}/models`, {
-      headers: { Authorization: `Bearer ${c.key}` },
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    let ids: string[] = (data?.data ?? []).map((m: any) => m.id).filter(Boolean);
-    const provider = c.base.includes('groq') ? 'groq' : 'openai';
-    if (provider === 'openai') {
-      // keep only chat models — the account also lists embeddings, TTS, image,
-      // and legacy completion models that can't author a lesson
-      ids = ids.filter(
-        (m) => /^(gpt-4|gpt-5|o1|o3|o4|chatgpt)/.test(m) &&
-          !/(audio|realtime|transcribe|tts|image|search|moderation)/.test(m),
-      );
-    }
-    const preferred = (PREFERRED[provider] || []).filter((m) => ids.includes(m));
-    const rest = ids.filter((m) => !preferred.includes(m)).sort();
-    return [...preferred, ...rest];
-  } catch {
-    return [];
-  }
-}

@@ -120,6 +120,46 @@ export async function groundDSL(dsl: AnimationDSL): Promise<{ dsl: AnimationDSL;
     const s = scenes[i] as any;
     if (s.type === 'code') { currentCode = s.code; currentLang = s.language; }
     else if (s.type === 'diff') { currentCode = s.after; currentLang = s.language; }
+    else if (s.type === 'ide' && Array.isArray(s.steps)) {
+      // Replay type/create steps into file buffers, then ground each run step.
+      const buffers: Record<string, string> = {};
+      for (const f of s.files || []) {
+        if (f?.path) buffers[f.path] = f.code || '';
+      }
+      let active = (s.files?.[0]?.path as string) || '';
+      for (const step of s.steps) {
+        const a = step.action;
+        if (!a) continue;
+        if (a.kind === 'open' && a.file) active = a.file;
+        else if (a.kind === 'create' && a.file) {
+          if (!(a.file in buffers)) buffers[a.file] = '';
+          active = a.file;
+        } else if (a.kind === 'type' && a.code != null) {
+          const path = a.file || active;
+          if (path) {
+            buffers[path] = a.code;
+            active = path;
+          }
+        } else if (a.kind === 'run') {
+          const path = active;
+          const code = (path && buffers[path]) || '';
+          const lang =
+            (s.files || []).find((f: { path: string; language?: string }) => f.path === path)?.language ||
+            (path?.endsWith('.py') ? 'python' : path?.endsWith('.ts') || path?.endsWith('.tsx') ? 'typescript' : 'javascript');
+          if (!code.trim()) continue;
+          currentCode = code;
+          currentLang = lang;
+          const r = await runCode(lang, code);
+          if (!r.supported) continue;
+          if (r.ok && r.stdout.trim()) {
+            a.output = r.stdout;
+            grounded++;
+          } else if (!r.ok) {
+            failures++;
+          }
+        }
+      }
+    }
     else if (s.type === 'terminal' && currentCode) {
       const r = await runCode(currentLang, currentCode);
       if (!r.supported) continue; // language we can't run — leave the model's output

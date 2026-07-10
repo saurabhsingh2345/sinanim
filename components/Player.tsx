@@ -23,16 +23,27 @@ import { recordResult, recordReview } from '@/lib/mastery';
 import { Prepared, prepare, renderFrame, RenderUI } from '@/lib/renderer';
 import { SoundEngine } from '@/lib/sounds';
 import { Conductor } from '@/lib/conductor';
-import { recordVideo, downloadBlob } from '@/lib/export';
+import { exportVideo, downloadBlob } from '@/lib/export';
 import { buildNarration } from '@/lib/narration';
+import { WordTiming } from '@/lib/word-timeline';
+import { downloadCaptions } from '@/lib/captions';
 import { DEFAULT_VOICE, NarrationEngine, TTSPhase, VOICES } from '@/lib/tts';
 import { formatTime, clamp, cx } from '@/lib/utils';
 import { QuizOverlay } from './QuizOverlay';
 import { Transcript } from './Transcript';
 
+/** Fingerprint of what requires re-TTS (not every IDE keystroke). */
+function narrationFingerprint(dsl: AnimationDSL, voice: string, voiceOn: boolean): string {
+  return JSON.stringify({
+    v: voiceOn ? voice : '',
+    s: dsl.scenes.map((sc) => [sc.type, sc.narration || '', sc.duration]),
+  });
+}
+
 // ── Chapters (seekbar segments) ────────────────────────────────────────────────
 const SECTION_TYPES = new Set([
   'title', 'chapter', 'code', 'diff', 'terminal', 'bullets', 'diagram', 'quote', 'bigstat', 'quiz', 'challenge', 'viz',
+  'ide', 'cli', 'browser', 'split', 'api', 'pr', 'layout',
 ]);
 
 interface Chapter { start: number; end: number; label: string; kind: string; }
@@ -51,6 +62,13 @@ function chapterLabel(s: AnimationDSL['scenes'][number]): string {
     case 'quiz': return 'checkpoint';
     case 'challenge': return 'your turn';
     case 'viz': return s.title || 'visualized';
+    case 'ide': return s.project ? `building ${s.project}` : 'in the editor';
+    case 'cli': return 'in the terminal';
+    case 'browser': return s.title || 'in the browser';
+    case 'split': return 'code + preview';
+    case 'api': return `${s.method} request`;
+    case 'pr': return s.title || 'reviewing the diff';
+    case 'layout': return 'code + preview';
     default: return s.type;
   }
 }
@@ -89,15 +107,32 @@ export interface PlayerProps {
   onQuizResult?: (correct: boolean) => void;
   /** Furthest point reached, 0..1 — fired on pause/end. */
   onProgress?: (fraction: number) => void;
+  /**
+   * Studio: when this changes, seek to that scene's startTime and pause
+   * so creators edit what they see.
+   */
+  focusSceneIndex?: number | null;
+  /** Studio: seek to an absolute time (seconds) without changing focusSceneIndex. */
+  seekToTime?: number | null;
 }
 
-export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizResult, onProgress }: PlayerProps) {
+export function Player({
+  dsl,
+  autoPlay,
+  showTranscript = true,
+  onEnded,
+  onQuizResult,
+  onProgress,
+  focusSceneIndex = null,
+  seekToTime = null,
+}: PlayerProps) {
   const screenRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<SoundEngine | null>(null);
   const conductorRef = useRef<Conductor | null>(null);
   const narrEngineRef = useRef<NarrationEngine | null>(null);
   const narrBuffersRef = useRef<Map<number, AudioBuffer>>(new Map());
+  const narrWordsRef = useRef<Map<number, WordTiming[]>>(new Map());
   const prepRef = useRef<Prepared | null>(null);
   const rafRef = useRef<number>(0);
   const lastTsRef = useRef<number>(0);
@@ -111,7 +146,7 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
   const [ready, setReady] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(dsl.sfx === false);
   const [speed, setSpeed] = useState(1);
   const [captionsOn, setCaptionsOn] = useState(dsl.captions !== false);
   const [exporting, setExporting] = useState(false);
@@ -130,9 +165,33 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
   const [voice, setVoice] = useState(dsl.voice || DEFAULT_VOICE);
   const [tts, setTts] = useState<TTSPhase>({ phase: 'idle' });
   const [adsl, setAdsl] = useState<AnimationDSL>(dsl);
+  const narrFpRef = useRef('');
+
+  // Sync Lesson look from Studio / course DSL into Player chrome
+  useEffect(() => {
+    setVoice(dsl.voice || DEFAULT_VOICE);
+  }, [dsl.voice]);
+  useEffect(() => {
+    const on = dsl.captions !== false;
+    setCaptionsOn(on);
+    if (prepRef.current) {
+      prepRef.current.dsl.captions = on;
+      draw(timeRef.current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dsl.captions]);
+  useEffect(() => {
+    const nextMuted = dsl.sfx === false;
+    setMuted(nextMuted);
+    if (engineRef.current) {
+      engineRef.current.muted = nextMuted;
+      if (nextMuted) engineRef.current.stopNarration();
+    }
+  }, [dsl.sfx]);
 
   if (!engineRef.current && typeof window !== 'undefined') {
     engineRef.current = new SoundEngine();
+    engineRef.current.muted = dsl.sfx === false;
     conductorRef.current = new Conductor(engineRef.current);
     conductorRef.current.interactive = true; // quizzes are answered, not auto-revealed
     narrEngineRef.current = new NarrationEngine();
@@ -149,63 +208,100 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
     if (ctx) renderFrame(ctx, prep, t, { ...(quizUiRef.current ?? {}), interactive: true });
   }, []);
 
-  // ── Pipeline: synthesize narration, pace, tokenize ──
+  // ── Pipeline: synthesize narration, pace, tokenize (debounced; TTS only when VO changes) ──
   useEffect(() => {
     let cancelled = false;
-    setReady(false);
-    playingRef.current = false;
-    setPlaying(false);
-    setQuiz(null);
-    setChallenge(null);
-    setPlayground(null);
-    setScore({ correct: 0, total: 0 });
-    quizUiRef.current = undefined;
-    answeredRef.current.clear();
-    solvedRef.current.clear();
-    engineRef.current?.stopNarration();
-    (async () => {
-      try {
-        await (document as any).fonts?.load?.('30px "JetBrains Mono"');
-        await (document as any).fonts?.ready;
-      } catch {}
-
-      let effective = dsl;
-      let buffers = new Map<number, AudioBuffer>();
-      if (voiceOn && hasNarration && engineRef.current && narrEngineRef.current) {
-        try {
-          const res = await buildNarration(
-            { ...dsl, voice },
-            narrEngineRef.current,
-            engineRef.current.context,
-            (p) => { if (!cancelled) setTts(p); },
-          );
-          effective = res.dsl;
-          buffers = res.buffers;
-        } catch (e) {
-          if (!cancelled) {
-            setTts({ phase: 'error', message: e instanceof Error ? e.message : 'voice synthesis failed' });
-          }
-        }
-      } else {
-        setTts({ phase: 'idle' });
+    const timer = setTimeout(() => {
+      const fp = narrationFingerprint(dsl, voice, voiceOn);
+      const ttsChanged = fp !== narrFpRef.current;
+      if (ttsChanged) {
+        setReady(false);
+        playingRef.current = false;
+        setPlaying(false);
+        setQuiz(null);
+        setChallenge(null);
+        setPlayground(null);
+        setScore({ correct: 0, total: 0 });
+        quizUiRef.current = undefined;
+        answeredRef.current.clear();
+        solvedRef.current.clear();
+        engineRef.current?.stopNarration();
       }
-      if (cancelled) return;
+      (async () => {
+        try {
+          await (document as any).fonts?.load?.('30px "JetBrains Mono"');
+          await (document as any).fonts?.ready;
+        } catch {}
 
-      narrBuffersRef.current = buffers;
-      conductorRef.current?.setNarration(buffers);
+        let effective = dsl;
+        let buffers = narrBuffersRef.current;
+        let words = narrWordsRef.current;
 
-      const prep = await prepare(effective);
-      if (cancelled) return;
-      prepRef.current = prep;
-      timeRef.current = 0;
-      setTime(0);
-      conductorRef.current?.reset(0);
-      setAdsl(effective);
-      setReady(true);
-      draw(0);
-    })();
+        const needTts = !!(voiceOn && hasNarration && engineRef.current && narrEngineRef.current);
+        if (needTts && ttsChanged) {
+          try {
+            const res = await buildNarration(
+              { ...dsl, voice },
+              narrEngineRef.current!,
+              engineRef.current!.context,
+              (p) => { if (!cancelled) setTts(p); },
+            );
+            if (cancelled) return;
+            effective = res.dsl;
+            buffers = res.buffers;
+            words = res.words;
+            narrFpRef.current = fp;
+          } catch (e) {
+            if (!cancelled) {
+              setTts({ phase: 'error', message: e instanceof Error ? e.message : 'voice synthesis failed' });
+            }
+          }
+        } else if (needTts && !ttsChanged && adsl.scenes.length === dsl.scenes.length) {
+          setTts({ phase: 'ready' });
+          effective = {
+            ...dsl,
+            scenes: dsl.scenes.map((s, i) => {
+              const prev = adsl.scenes[i];
+              if (prev && prev.type === s.type && prev.narrationDuration != null) {
+                return { ...s, narrationDuration: prev.narrationDuration };
+              }
+              return s;
+            }),
+          };
+        } else {
+          setTts({ phase: 'idle' });
+          if (!needTts) narrFpRef.current = fp;
+        }
+        if (cancelled) return;
+
+        narrBuffersRef.current = buffers;
+        narrWordsRef.current = words;
+        conductorRef.current?.setNarration(buffers);
+
+        const prep = await prepare(effective);
+        if (cancelled) return;
+        prep.dsl.captions = captionsOn;
+        prep.words = words;
+        prepRef.current = prep;
+        if (ttsChanged) {
+          timeRef.current = 0;
+          setTime(0);
+          conductorRef.current?.reset(0);
+          draw(0);
+        } else {
+          const t = Math.min(timeRef.current, prep.dsl.duration || 0);
+          timeRef.current = t;
+          conductorRef.current?.reset(t);
+          draw(t);
+        }
+        setAdsl(effective);
+        setReady(true);
+      })();
+    }, 480);
+
     return () => {
       cancelled = true;
+      clearTimeout(timer);
       cancelAnimationFrame(rafRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -287,12 +383,16 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
 
   const play = useCallback(async () => {
     if (!ready || exporting || playingRef.current) return;
+    if (quiz || challenge) return;
     await engineRef.current?.resume();
     const total = prepRef.current?.dsl.duration || 0;
     if (timeRef.current >= total) {
       timeRef.current = 0;
       setTime(0);
       answeredRef.current.clear();
+      solvedRef.current.clear();
+      setQuiz(null);
+      setChallenge(null);
       setScore({ correct: 0, total: 0 });
     }
     conductorRef.current!.rate = speedRef.current;
@@ -301,7 +401,7 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
     setPlaying(true);
     lastTsRef.current = performance.now();
     rafRef.current = requestAnimationFrame(tickLoop);
-  }, [ready, exporting, tickLoop]);
+  }, [ready, exporting, tickLoop, quiz, challenge]);
 
   const seek = useCallback(
     (t: number) => {
@@ -322,6 +422,23 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
     },
     [draw],
   );
+
+  // Studio: jump to the selected scene and pause so creators edit what they see
+  useEffect(() => {
+    if (!ready || focusSceneIndex == null || focusSceneIndex < 0) return;
+    const scene = adsl.scenes[focusSceneIndex] || dsl.scenes[focusSceneIndex];
+    if (!scene) return;
+    pause();
+    seek(scene.startTime + 0.05);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusSceneIndex, ready]);
+
+  useEffect(() => {
+    if (!ready || seekToTime == null || !isFinite(seekToTime)) return;
+    pause();
+    seek(seekToTime);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seekToTime, ready]);
 
   // autoplay only when the audio context is already unlocked by a user gesture
   useEffect(() => {
@@ -507,7 +624,7 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (playground) return; // the playground owns the keyboard
+      if (playground || quiz || challenge) return; // overlays own the keyboard
       switch (e.key) {
         case ' ':
         case 'k':
@@ -532,7 +649,7 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [play, pause, seek, toggleMute, toggleCaptions, toggleFullscreen, playground]);
+  }, [play, pause, seek, toggleMute, toggleCaptions, toggleFullscreen, playground, quiz, challenge]);
 
   // ── Seekbar interaction ──
   const barRef = useRef<HTMLDivElement>(null);
@@ -573,7 +690,7 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
     try {
       const wasMuted = engine.muted;
       engine.muted = false; // always bake audio into the export
-      const { blob, ext } = await recordVideo(canvas, prep, engine, setProgress, narrBuffersRef.current);
+      const { blob, ext } = await exportVideo(canvas, prep, engine, setProgress, narrBuffersRef.current);
       engine.muted = wasMuted;
       const safe = adsl.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
       downloadBlob(blob, `${safe || 'lesson'}.${ext}`);
@@ -586,6 +703,14 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
       setProgress(0);
     }
   }, [adsl.title, exporting, pause, seek]);
+
+  // Subtitle file (.srt) from the same word timeline as the burned-in captions.
+  const doCaptionFile = useCallback(() => {
+    const prep = prepRef.current;
+    if (!prep) return;
+    const safe = adsl.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    downloadCaptions(prep.dsl, prep.words, 'srt', `${safe || 'lesson'}.srt`);
+  }, [adsl.title]);
 
   const atEnd = time >= adsl.duration - 1e-3;
   const quizScene = quiz ? (adsl.scenes[quiz.idx] as QuizScene) : null;
@@ -614,7 +739,7 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
           height={adsl.height}
           className="canvas"
           onClick={() => {
-            if (!ready || quiz || exporting) return;
+            if (!ready || quiz || challenge || exporting) return;
             if (playing) pause();
             else play();
           }}
@@ -627,12 +752,12 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
           </div>
         )}
 
-        {ready && !playing && !quiz && !exporting && !atEnd && (
+        {ready && !playing && !quiz && !challenge && !exporting && !atEnd && (
           <button className="bigplay" onClick={play} aria-label="Play">
             <Play size={30} fill="currentColor" />
           </button>
         )}
-        {ready && atEnd && !exporting && !quiz && (
+        {ready && atEnd && !exporting && !quiz && !challenge && (
           <button className="bigplay" onClick={() => { seek(0); play(); }} aria-label="Replay">
             <RotateCcw size={28} />
           </button>
@@ -728,6 +853,11 @@ export function Player({ dsl, autoPlay, showTranscript = true, onEnded, onQuizRe
             <button className="ib" onClick={doExport} aria-label="Export video">
               <Download size={16} />
             </button>
+            {hasNarration && (
+              <button className="ib txt" onClick={doCaptionFile} aria-label="Download subtitles (.srt)">
+                srt
+              </button>
+            )}
             <button className="ib" onClick={toggleFullscreen} aria-label="Fullscreen">
               {fullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
             </button>

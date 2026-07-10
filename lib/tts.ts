@@ -85,16 +85,24 @@ export class NarrationEngine {
     const hit = this.cache.get(key);
     if (hit) return hit;
 
-    const tts = await this.load(onDownloadProgress);
-    const audio = await tts.generate(text, { voice });
-    const samples: Float32Array = audio.audio ?? audio.data;
-    const sampleRate: number = audio.sampling_rate ?? 24000;
-    const clip: SynthesizedClip = {
-      samples,
-      sampleRate,
-      duration: samples.length / sampleRate,
-    };
-    this.cache.set(key, clip);
-    return clip;
+    try {
+      const tts = await this.load(onDownloadProgress);
+      const audio = await tts.generate(text, { voice });
+      const samples: Float32Array = audio.audio ?? audio.data;
+      const sampleRate: number = audio.sampling_rate ?? 24000;
+      const clip: SynthesizedClip = {
+        samples,
+        sampleRate,
+        duration: samples.length / sampleRate,
+      };
+      this.cache.set(key, clip);
+      return clip;
+    } catch {
+      // Free local fallback: optional Piper CDN, else Web Speech API.
+      const { synthesizeLocalFallback } = await import('./piper');
+      const clip = await synthesizeLocalFallback(text);
+      this.cache.set(key, clip);
+      return clip;
+    }
   }
 }
