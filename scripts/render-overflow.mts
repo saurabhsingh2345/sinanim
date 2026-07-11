@@ -22,12 +22,13 @@ const dsl = normalizeDSL({
     ], answerIndex: 1, explanation: 'The continuation is wrapped as a microtask — that is why code after an await never runs in the same tick as the code before it, even for already-resolved promises.', startTime: 12, duration: 8 },
     { type: 'bigstat', value: '~11,000ms', label: 'time wasted by sequential awaits in a ten-request loop that could run in parallel', startTime: 20, duration: 4 },
     { type: 'chapter', number: 2, text: 'The Microtask Queue and Why Ordering Matters More Than You Think', startTime: 24, duration: 4 },
+    { type: 'quote', text: 'Programs must be written for people to read, and only incidentally for machines to execute — and asynchrony is where that principle is tested hardest.', attribution: 'Abelson & Sussman, loosely', startTime: 28, duration: 4 },
   ],
 });
 const prep = await prepare(dsl);
 const canvas = createCanvas(1920, 1080);
 const ctx = canvas.getContext('2d') as any;
-const shots: [string, number][] = [['of-title', 2], ['of-bullets', 11], ['of-quiz', 19.5], ['of-bigstat', 22], ['of-chapter', 26.5]];
+const shots: [string, number][] = [['of-title', 2], ['of-bullets', 11], ['of-quiz', 19.5], ['of-bigstat', 22], ['of-chapter', 26.5], ['of-quote', 30.5]];
 for (const [name, t] of shots) {
   renderFrame(ctx, prep, t);
   writeFileSync(`/tmp/${name}.png`, canvas.toBuffer('image/png'));

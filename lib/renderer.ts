@@ -1418,29 +1418,46 @@ function drawQuoteCard(ctx: CanvasRenderingContext2D, scene: QuoteScene, time: n
   ctx.globalAlpha = a;
   ctx.translate(0, (1 - enter) * 18);
 
-  const qf = fitLines(ctx, scene.text, W * 0.62, Math.round(H / 16), { maxLines: 5, weight: 600 });
+  const qf = fitLines(ctx, scene.text, W * 0.58, Math.round(H / 16), { maxLines: 5, weight: 600 });
   const fs = qf.fs;
   const lines = qf.lines;
   const lh = fs * 1.5;
-  let y = H / 2 - ((lines.length - 1) * lh) / 2;
 
-  // oversized quote mark
-  ctx.font = `800 ${Math.round(H / 4.5)}px Georgia, serif`;
-  ctx.fillStyle = withAlpha(C.accent, 0.22);
-  ctx.fillText('“', W * 0.14, H * 0.38);
+  // designed panel: soft card + accent bar, like the quiz surface
+  const padX = fs * 2.2, padY = fs * 1.8;
+  const attrH = scene.attribution ? fs * 1.7 : 0;
+  const panelW = Math.min(W * 0.7, W * 0.58 + padX * 2);
+  const panelH = lines.length * lh + padY * 2 + attrH;
+  const px = W / 2 - panelW / 2, py = H / 2 - panelH / 2;
+  ctx.fillStyle = C.panelTop;
+  roundRect(ctx, px, py, panelW, panelH, 20);
+  ctx.fill();
+  ctx.strokeStyle = C.border;
+  ctx.lineWidth = 1.2;
+  roundRect(ctx, px, py, panelW, panelH, 20);
+  ctx.stroke();
+  ctx.fillStyle = C.accent;
+  roundRect(ctx, px, py + panelH * 0.18, 5, panelH * 0.64 * enter, 2.5);
+  ctx.fill();
+
+  // oversized quote mark hangs off the panel's top-left
+  ctx.font = `800 ${Math.round(H / 5)}px Georgia, serif`;
+  ctx.fillStyle = withAlpha(C.accent, 0.25);
+  ctx.fillText('“', px - fs * 0.6, py + fs * 1.1);
 
   ctx.font = `600 ${fs}px ${MONO}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = C.text;
+  let y = py + padY + lh / 2;
   for (const line of lines) {
     ctx.fillText(line, W / 2, y);
     y += lh;
   }
   if (scene.attribution) {
-    ctx.font = `500 ${Math.round(H / 32)}px ${MONO}`;
+    ctx.font = `500 ${Math.round(H / 34)}px ${MONO}`;
     ctx.fillStyle = C.accent;
-    ctx.fillText(`— ${scene.attribution}`, W / 2, y + fs * 0.6);
+    ctx.fillText(`— ${scene.attribution}`, W / 2, y + fs * 0.15);
   }
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
@@ -1474,7 +1491,18 @@ function drawBigStatCard(ctx: CanvasRenderingContext2D, scene: BigStatScene, tim
   // value shrinks to fit rather than bleeding off the sides
   const vf = fitLines(ctx, display, W * 0.9, Math.round(H / 4.6), { maxLines: 1, weight: 800 });
   const fs = vf.fs;
+  const grow = easeOutExpo(clamp(el / 1.2, 0, 1));
+
+  // hairline rules bracket the number — a designed stat, not a floating one
   ctx.font = `800 ${fs}px ${MONO}`;
+  const vw = ctx.measureText(display).width;
+  const ruleW = Math.min(vw * 1.15, W * 0.8) * grow;
+  ctx.fillStyle = C.sep;
+  ctx.fillRect(W / 2 - ruleW / 2, H * 0.46 - fs * 0.72, ruleW, 2);
+  ctx.fillRect(W / 2 - ruleW / 2, H * 0.46 + fs * 0.62, ruleW, 2);
+  ctx.fillStyle = C.accent;
+  ctx.fillRect(W / 2 - (fs * 0.9 * grow) / 2, H * 0.46 - fs * 0.72, fs * 0.9 * grow, 2);
+
   ctx.save();
   ctx.shadowColor = withAlpha(C.accent, 0.4);
   ctx.shadowBlur = 80;
@@ -1484,7 +1512,7 @@ function drawBigStatCard(ctx: CanvasRenderingContext2D, scene: BigStatScene, tim
 
   const lf = fitLines(ctx, scene.label, W * 0.72, Math.round(H / 24), { maxLines: 2, weight: 500 });
   ctx.fillStyle = C.dim;
-  lf.lines.forEach((l, i) => ctx.fillText(l, W / 2, H * 0.46 + fs * 0.72 + i * lf.fs * 1.4));
+  lf.lines.forEach((l, i) => ctx.fillText(l, W / 2, H * 0.46 + fs * 0.95 + i * lf.fs * 1.4));
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
   ctx.restore();
