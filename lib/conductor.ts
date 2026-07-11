@@ -139,9 +139,11 @@ export class Conductor {
       }
     });
 
-    if (typedChar !== undefined && time - this.lastKeyAt > 0.03) {
+    // Sparse, humanized typing: at most ~14 keys/s, with a deterministic
+    // one-in-three rest so it reads as fingers, not a machine gun.
+    if (typedChar !== undefined && time - this.lastKeyAt > 0.07) {
       this.lastKeyAt = time;
-      this.engine.keystroke(typedChar);
+      if (Math.floor(time * 331) % 3 !== 0) this.engine.keystroke(typedChar);
     }
 
     this.tickNarration(prep, time);

@@ -106,26 +106,29 @@ function writeWav(name: string, buf: Float64Array) {
 }
 
 // ── keyboard ───────────────────────────────────────────────────────────────────
-/** One key thock: low body + mid knock + brief noise tap, all damped fast. */
+/** One key thock: low body + mid knock + brief noise tap, all damped fast.
+ *  Tuned DULL on purpose — the tap is low-passed and quiet so long typing
+ *  passages sit under the voice instead of fighting it (the bright 2.5kHz
+ *  clatter was the #1 listener complaint). */
 function keySound(bodyHz: number, knockHz: number, decay: number, tapGain: number, seed: number): Float64Array {
   const rand = mulberry32(seed);
   const out = seconds(0.14);
   mix(out, sine(bodyHz, 0.12, decay), 1.0);
-  mix(out, sine(knockHz, 0.06, decay * 0.4), 0.35);
-  const tap = onePoleHP(noise(0.02, rand), 2500);
-  envelopeExp(tap, 0.004);
+  mix(out, sine(knockHz, 0.06, decay * 0.4), 0.22);
+  const tap = onePoleLP(onePoleHP(noise(0.02, rand), 900), () => 2200);
+  envelopeExp(tap, 0.005);
   mix(out, tap, tapGain);
-  normalize(out, 0.7);
+  normalize(out, 0.55);
   return out;
 }
 
 for (let v = 0; v < 5; v++) {
-  const body = 150 + v * 11; // each variant sits on its own pitch
-  const knock = 820 + v * 90;
-  writeWav(`key-${v + 1}.wav`, keySound(body, knock, 0.024 + v * 0.002, 0.5, 100 + v));
+  const body = 138 + v * 9; // each variant sits on its own pitch
+  const knock = 460 + v * 55;
+  writeWav(`key-${v + 1}.wav`, keySound(body, knock, 0.028 + v * 0.002, 0.22, 100 + v));
 }
-writeWav('space.wav', keySound(112, 560, 0.034, 0.35, 200));
-writeWav('enter.wav', keySound(92, 470, 0.045, 0.4, 300));
+writeWav('space.wav', keySound(104, 380, 0.038, 0.16, 200));
+writeWav('enter.wav', keySound(88, 330, 0.05, 0.18, 300));
 
 // ── UI ─────────────────────────────────────────────────────────────────────────
 {

@@ -124,11 +124,11 @@ export class SoundEngine implements SfxSink {
    *  full-volume clatter was the #1 listener complaint. */
   keystroke(ch?: string) {
     if (ch === '\n' && this.buffers.enter) {
-      this.play(this.buffers.enter, 0.26 + Math.random() * 0.06, 0.97 + Math.random() * 0.06);
+      this.play(this.buffers.enter, 0.16 + Math.random() * 0.04, 0.97 + Math.random() * 0.06);
       return;
     }
     if (ch === ' ' && this.buffers.space) {
-      this.play(this.buffers.space, 0.2 + Math.random() * 0.06, 0.96 + Math.random() * 0.08);
+      this.play(this.buffers.space, 0.12 + Math.random() * 0.04, 0.96 + Math.random() * 0.08);
       return;
     }
     const keys = this.buffers.keys;
@@ -137,7 +137,7 @@ export class SoundEngine implements SfxSink {
     let v = Math.floor(Math.random() * keys.length);
     if (keys.length > 1 && v === this.lastKeyVariant) v = (v + 1) % keys.length;
     this.lastKeyVariant = v;
-    this.play(keys[v], 0.17 + Math.random() * 0.07, 0.93 + Math.random() * 0.13);
+    this.play(keys[v], 0.09 + Math.random() * 0.04, 0.93 + Math.random() * 0.13);
   }
 
   click() {
@@ -231,11 +231,11 @@ export class SfxCollector implements SfxSink {
 
   keystroke(ch?: string) {
     if (ch === '\n' && this.buffers.enter) {
-      this.add(this.buffers.enter, 0.26 + Math.random() * 0.06, 0.97 + Math.random() * 0.06);
+      this.add(this.buffers.enter, 0.16 + Math.random() * 0.04, 0.97 + Math.random() * 0.06);
       return;
     }
     if (ch === ' ' && this.buffers.space) {
-      this.add(this.buffers.space, 0.2 + Math.random() * 0.06, 0.96 + Math.random() * 0.08);
+      this.add(this.buffers.space, 0.12 + Math.random() * 0.04, 0.96 + Math.random() * 0.08);
       return;
     }
     const keys = this.buffers.keys;
@@ -243,7 +243,7 @@ export class SfxCollector implements SfxSink {
     let v = Math.floor(Math.random() * keys.length);
     if (keys.length > 1 && v === this.lastKeyVariant) v = (v + 1) % keys.length;
     this.lastKeyVariant = v;
-    this.add(keys[v], 0.17 + Math.random() * 0.07, 0.93 + Math.random() * 0.13);
+    this.add(keys[v], 0.09 + Math.random() * 0.04, 0.93 + Math.random() * 0.13);
   }
 
   click() { this.add(this.buffers.click, 0.8, 0.98 + Math.random() * 0.04); }
