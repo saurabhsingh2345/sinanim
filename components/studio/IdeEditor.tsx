@@ -8,6 +8,7 @@ const ACTION_LABELS: Record<IdeAction['kind'], string> = {
   type: 'Type code into a file',
   run: 'Run a terminal command',
   highlight: 'Highlight lines',
+  explain: 'Explain (hold + teach)',
 };
 
 type Tab = 'content' | 'voice' | 'look';

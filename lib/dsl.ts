@@ -4,6 +4,7 @@ import { typeDuration } from './timing';
 import { diffLines } from './diff';
 import { morphTiming } from './morph';
 import { THEME_IDS, DEFAULT_THEME_ID } from './themes';
+import { composeStepNarration, hasStepNarration } from './step-sync';
 
 const MASCOT_ACTIONS = ['wave', 'point', 'think', 'celebrate', 'shocked', 'idle'];
 const TRANSITIONS: SceneTransition[] = ['none', 'fade', 'slide', 'push', 'zoom'];
@@ -406,19 +407,38 @@ export function normalizeDSL(raw: any): AnimationDSL {
                     startLine: Math.max(1, Number(a.startLine) || 1),
                     endLine: Math.max(1, Number(a.endLine) || Number(a.startLine) || 1),
                   };
+                else if (kind === 'explain')
+                  action = {
+                    kind: 'explain',
+                    file: a.file ? String(a.file) : undefined,
+                    startLine: a.startLine != null ? Math.max(1, Number(a.startLine) || 1) : undefined,
+                    endLine:
+                      a.endLine != null || a.startLine != null
+                        ? Math.max(1, Number(a.endLine) || Number(a.startLine) || 1)
+                        : undefined,
+                    terminal: a.terminal === true || a.target === 'terminal' ? true : undefined,
+                  };
                 if (!action) return null;
                 return {
                   caption: st.caption ? String(st.caption) : undefined,
                   action,
+                  narration:
+                    typeof st.narration === 'string' && st.narration.trim()
+                      ? st.narration.trim()
+                      : undefined,
                   key: st.key ? String(st.key) : undefined,
                   weight: st.weight ? clamp(Number(st.weight), 0.2, 5) : undefined,
                 };
               })
-              .filter(Boolean) as IdeStep[]).slice(0, 24)
+              .filter(Boolean) as IdeStep[]).slice(0, 32)
           : [];
         // Files touched only by steps are NOT pre-added — they pop into the tree
         // when their step runs (a "created" file appears live). Files listed here
         // are the project's existing files, visible from the start.
+        //
+        // Steps that carry their own narration compose the scene's spoken text
+        // (intro + steps, in order); step-sync maps synthesized sentence offsets
+        // back to step start times so each beat lands with its own words.
         return {
           type: 'ide',
           project: s.project ? String(s.project) : undefined,
@@ -427,6 +447,9 @@ export function normalizeDSL(raw: any): AnimationDSL {
           files,
           steps,
           ...base,
+          ...(hasStepNarration(steps)
+            ? { narration: composeStepNarration(base.narration, steps) }
+            : {}),
         };
       }
       case 'cli': {

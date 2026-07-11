@@ -304,15 +304,23 @@ export type IdeAction =
   /** Run `command` in the integrated terminal; `output` streams in beneath it. */
   | { kind: 'run'; command: string; output?: string }
   /** Glow lines `startLine`..`endLine` of the active file. */
-  | { kind: 'highlight'; file?: string; startLine: number; endLine: number };
+  | { kind: 'highlight'; file?: string; startLine: number; endLine: number }
+  /** Teach without changing the workspace: hold everything, glow lines when
+   *  given (like highlight) or zoom the terminal (`terminal:true`) while the
+   *  step's narration explains what's on screen. THE explanation beat. */
+  | { kind: 'explain'; file?: string; startLine?: number; endLine?: number; terminal?: boolean };
 
 export interface IdeStep {
   /** Short on-screen caption for this step (optional). */
   caption?: string;
   action: IdeAction;
+  /** What the teacher SAYS during this step (2-4 spoken sentences). The step
+   *  starts exactly when its first sentence is spoken and holds while the
+   *  voice continues — this is what syncs typing/highlights/runs to speech. */
+  narration?: string;
   /** Optional keystroke/shortcut chip to flash for this step, e.g. "⌘S". */
   key?: string;
-  /** Relative pacing weight for how long this step holds (default 1). */
+  /** Relative pacing weight — fallback only, when steps carry no narration. */
   weight?: number;
 }
 
@@ -327,6 +335,9 @@ export interface IdeScene extends BaseScene {
   /** Initial files seeding the tree (steps may add more via `open`/`type`). */
   files: IdeFile[];
   steps: IdeStep[];
+  /** Computed by the narration pipeline (never authored): scene-relative start
+   *  time of each step = the moment its first narration sentence is spoken. */
+  stepNarrationTimes?: number[];
 }
 
 // ── Terminal / CLI session template ─────────────────────────────────────────────

@@ -73,6 +73,12 @@ function autocompleteSuggestions(lang: string, frag: string): string[] {
 /** Scene-relative start time of each IDE step (weighted across the voiced window). */
 export function ideStepTimes(scene: IdeScene): number[] {
   const window = Math.min(scene.narrationDuration ?? scene.duration, scene.duration);
+  // Narration-synced: each step starts the moment its first sentence is spoken
+  // (computed by the narration pipeline). The weights model is the fallback.
+  if (scene.stepNarrationTimes && scene.stepNarrationTimes.length === scene.steps.length) {
+    const cap = Math.max(window - 0.2, 0.2);
+    return scene.stepNarrationTimes.map((t) => Math.min(t, cap));
+  }
   const usable = Math.max(window - 0.5, 0.6);
   const weight = (st: IdeScene['steps'][number]) =>
     st.weight ?? (st.action.kind === 'type' ? 1.7 : st.action.kind === 'run' ? 1.5 : 0.8);
@@ -102,7 +108,7 @@ export function ideTypedCount(scene: IdeScene, time: number): number {
       const full = act.code;
       const cp = commonPrefixLen(prev, full);
       buffers.set(act.file, full);
-      const speed = act.typingSpeed ?? 42;
+      const speed = act.typingSpeed ?? 26;
       const reveal = j < k
         ? full.length
         : typedRevealIndex(prev, full, stepLocal, stepDur, speed);
@@ -136,7 +142,7 @@ export function ideTypedCharAt(scene: IdeScene, time: number): string {
     }
     const prev = buffers.get(st.action.file) || '';
     const full = st.action.code;
-    const reveal = typedRevealIndex(prev, full, stepLocal, stepDur, st.action.typingSpeed ?? 42);
+    const reveal = typedRevealIndex(prev, full, stepLocal, stepDur, st.action.typingSpeed ?? 26);
     if (reveal <= 0) return '';
     return full[reveal - 1] || '';
   }
@@ -269,13 +275,19 @@ function ideStateAt(scene: IdeScene, time: number): IdeState {
       const prev = buffers.get(act.file) || ''; const full = act.code;
       buffers.set(act.file, full);
       if (!done) {
-        const reveal = typedRevealIndex(prev, full, stepLocal, stepDur, act.typingSpeed ?? 42);
+        const reveal = typedRevealIndex(prev, full, stepLocal, stepDur, act.typingSpeed ?? 26);
         const caretLine = full.slice(0, reveal).split('\n').length - 1;
         typing = { file: act.file, reveal, caretLine }; hi = null;
       }
     } else if (act.kind === 'run') {
       const p = done ? 1 : pE;
       term.push({ command: act.command, output: act.output || '', cmdP: done ? 1 : clamp(p / 0.3, 0, 1), outP: done ? 1 : clamp((p - 0.35) / 0.6, 0, 1) });
+    } else if (act.kind === 'explain') {
+      // teach in place: nothing in the workspace changes; glow lines when given
+      if (!done && act.startLine != null) {
+        const f = act.file || active;
+        if (f) { see(f, j); openTab(f); hi = { file: f, start: act.startLine, end: act.endLine ?? act.startLine }; }
+      }
     } else {
       const f = act.file || active; if (f) { see(f, j); openTab(f); hi = { file: f, start: act.startLine, end: act.endLine }; }
     }
@@ -309,9 +321,14 @@ function ideFocusRaw(scene: IdeScene, time: number, W: number, H: number): { x: 
     zoom = 1.22;
   } else if (S.actionKind === 'run') {
     y = L.codeTop + codeH + termH / 2; x = editorMidX; zoom = 1.18;
-  } else if (S.actionKind === 'highlight' && S.hi) {
+  } else if ((S.actionKind === 'highlight' || S.actionKind === 'explain') && S.hi) {
     const mid = (S.hi.start + S.hi.end) / 2 - 1;
     y = L.codeTop + 8 + clamp(mid, 0, maxRows - 1) * L.lh + L.lh / 2; x = editorMidX * 0.92; zoom = 1.28;
+  } else if (S.actionKind === 'explain' && S.term.length > 0) {
+    // explaining the run's output: settle on the terminal while the voice talks
+    y = L.codeTop + codeH + termH / 2; x = editorMidX; zoom = 1.2;
+  } else if (S.actionKind === 'explain') {
+    x = editorMidX; y = L.codeTop + codeH * 0.45; zoom = 1.12;
   } else if (S.actionKind === 'open' || S.actionKind === 'create') {
     x = L.exX + L.EXw / 2; y = L.cy + codeH / 2; zoom = 1.1;
   }

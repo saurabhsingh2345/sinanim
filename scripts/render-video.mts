@@ -23,6 +23,7 @@ import { prepare, renderFrame } from '../lib/renderer';
 import { Conductor } from '../lib/conductor';
 import { SfxCollector, SfxEvent, SampleBuffers } from '../lib/sounds';
 import { SENTENCE_GAP, splitSentences, stitchClips } from '../lib/narration';
+import { hasStepNarration, stepStartsFromSentences } from '../lib/step-sync';
 import { SynthesizedClip } from '../lib/tts';
 import { WordTiming, buildWordTimeline, SentenceClipInfo } from '../lib/word-timeline';
 
@@ -171,6 +172,7 @@ async function synthesizeNarration(dsl: AnimationDSL, voice: string) {
   const buffers = new Map<number, AudioBuffer>();
   const durations = new Map<number, number>();
   const words = new Map<number, WordTiming[]>();
+  const stepSync = new Map<number, number[]>();
   const narrated = dsl.scenes
     .map((s, i) => ({ i, sentences: s.narration ? splitSentences(s.narration) : [] }))
     .filter((x) => x.sentences.length > 0);
@@ -192,9 +194,22 @@ async function synthesizeNarration(dsl: AnimationDSL, voice: string) {
     buffers.set(i, fakeBuffer(stitched.samples, stitched.sampleRate));
     durations.set(i, stitched.duration);
     words.set(i, buildWordTimeline(infos));
+
+    // per-step sync: a step starts when its first narration sentence is spoken
+    const scene = dsl.scenes[i];
+    if (scene.type === 'ide' && hasStepNarration(scene.steps)) {
+      const starts = stepStartsFromSentences(scene.steps, sentences.length, infos.map((x) => x.offset));
+      stepSync.set(i, starts);
+      process.stdout.write(`\nide scene ${i}: ${starts.length} steps voice-synced at ${starts.map((t) => t.toFixed(1)).join('s, ')}s\n`);
+    }
   }
   if (total) process.stdout.write('\n');
-  return { dsl: paceToNarration(dsl, durations), buffers, words };
+  const paced = paceToNarration(dsl, durations);
+  stepSync.forEach((times, i) => {
+    const s = paced.scenes[i];
+    if (s.type === 'ide') s.stepNarrationTimes = times;
+  });
+  return { dsl: paced, buffers, words };
 }
 
 // ── One lesson → one MP4 ────────────────────────────────────────────────────────

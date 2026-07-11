@@ -11,6 +11,9 @@ import { AnimationDSL } from './types';
 import { paceToNarration } from './dsl';
 import { DEFAULT_VOICE, NarrationEngine, SynthesizedClip, TTSPhase } from './tts';
 import { WordTiming, buildWordTimeline, SentenceClipInfo } from './word-timeline';
+import { splitSentences, hasStepNarration, stepStartsFromSentences } from './step-sync';
+
+export { splitSentences };
 
 export interface NarrationResult {
   /** The timeline re-paced so speech always fits. */
@@ -24,31 +27,6 @@ export interface NarrationResult {
 
 /** Pause stitched between sentences (s) — a natural breath. */
 export const SENTENCE_GAP = 0.18;
-/** Kokoro stays reliable under ~300 chars; hard-split anything longer. */
-const MAX_SENTENCE = 300;
-
-/** Split narration into speakable sentences; long ones split again at commas. */
-export function splitSentences(text: string): string[] {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  if (!flat) return [];
-  const rough = flat.match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g) || [flat];
-
-  const out: string[] = [];
-  for (const r of rough) {
-    let s = r.trim();
-    while (s.length > MAX_SENTENCE) {
-      // prefer a clause boundary, then any space, then a hard cut
-      let cut = s.lastIndexOf(', ', MAX_SENTENCE - 20);
-      if (cut < 60) cut = s.lastIndexOf('; ', MAX_SENTENCE - 20);
-      if (cut < 60) cut = s.lastIndexOf(' ', MAX_SENTENCE - 20);
-      if (cut < 60) cut = MAX_SENTENCE - 20;
-      out.push(s.slice(0, cut + 1).trim());
-      s = s.slice(cut + 1).trim();
-    }
-    if (s) out.push(s);
-  }
-  return out;
-}
 
 /** Stitch sentence clips into one continuous clip with gaps between them. */
 export function stitchClips(clips: SynthesizedClip[]): SynthesizedClip {
@@ -78,6 +56,7 @@ export async function buildNarration(
   const buffers = new Map<number, AudioBuffer>();
   const durations = new Map<number, number>();
   const words = new Map<number, WordTiming[]>();
+  const stepSync = new Map<number, number[]>();
 
   const total = narrated.reduce((a, n) => a + n.sentences.length, 0);
   let done = 0;
@@ -109,8 +88,19 @@ export async function buildNarration(
       offset += c.samples.length / c.sampleRate + SENTENCE_GAP;
     });
     words.set(i, buildWordTimeline(infos));
+
+    // per-step sync: a step starts when its first narration sentence is spoken
+    const scene = dsl.scenes[i];
+    if (scene.type === 'ide' && hasStepNarration(scene.steps)) {
+      stepSync.set(i, stepStartsFromSentences(scene.steps, sentences.length, infos.map((x) => x.offset)));
+    }
   }
 
   onPhase?.({ phase: 'ready' });
-  return { dsl: paceToNarration(dsl, durations), buffers, words };
+  const paced = paceToNarration(dsl, durations);
+  stepSync.forEach((times, i) => {
+    const s = paced.scenes[i];
+    if (s.type === 'ide') s.stepNarrationTimes = times;
+  });
+  return { dsl: paced, buffers, words };
 }

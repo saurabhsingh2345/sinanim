@@ -58,16 +58,29 @@ const IDE_DEMO = () =>
           { path: 'requirements.txt', language: 'text', code: 'flask\n' },
         ],
         steps: [
-          { caption: 'Create the model file', action: { kind: 'create', file: 'models/todo.py' } },
+          {
+            caption: 'Create the model file',
+            action: { kind: 'create', file: 'models/todo.py' },
+            narration:
+              'Everything starts with the data, so we create a fresh file — models slash todo dot py. Keeping the model in its own file means the app code never needs to know how a todo works inside.',
+          },
           {
             caption: 'Define the Todo model',
             action: {
               kind: 'type',
               file: 'models/todo.py',
               code: 'class Todo:\n    def __init__(self, text):\n        self.text = text\n        self.done = False\n\n    def toggle(self):\n        self.done = not self.done',
-              typingSpeed: 38,
+              typingSpeed: 26,
             },
             key: '⌘S',
+            narration:
+              'A Todo holds two things: the text you typed, and a done flag. Notice the constructor only asks for the text — done always starts as false, because a brand-new todo is by definition not finished yet.',
+          },
+          {
+            caption: 'Why the toggle method?',
+            action: { kind: 'explain', file: 'models/todo.py', startLine: 6, endLine: 7 },
+            narration:
+              'Look at toggle for a second. We could let callers flip t dot done themselves, but then every screen that touches a todo repeats that logic. One tiny method, and the rule lives in exactly one place. That is the whole idea of a model.',
           },
           {
             caption: 'Wire up the Flask app',
@@ -75,12 +88,16 @@ const IDE_DEMO = () =>
               kind: 'type',
               file: 'app.py',
               code: 'from flask import Flask, jsonify\nfrom models.todo import Todo\n\napp = Flask(__name__)\ntodos = [Todo("Ship the IDE template")]\n\n@app.route("/todos")\ndef list_todos():\n    return jsonify([t.text for t in todos])',
-              typingSpeed: 40,
+              typingSpeed: 26,
             },
+            narration:
+              'Over in app dot py we import Flask and our Todo, build the app object, and seed one todo so there is something to see. Then the route: slash todos, and a function that returns the list as JSON.',
           },
           {
-            caption: 'This route returns our todos',
-            action: { kind: 'highlight', file: 'app.py', startLine: 7, endLine: 9 },
+            caption: 'This route is the contract',
+            action: { kind: 'explain', file: 'app.py', startLine: 7, endLine: 9 },
+            narration:
+              'These three lines are the contract with the outside world. The decorator says: when a request hits slash todos, call this function. And jsonify does the boring, critical work — headers, encoding, the correct content type. If you remember one shape from this lesson, make it this one.',
           },
           {
             caption: 'Run the server',
@@ -89,12 +106,18 @@ const IDE_DEMO = () =>
               command: 'python app.py',
               output: ' * Serving Flask app "app"\n * Running on http://127.0.0.1:5000\n127.0.0.1 - - "GET /todos" 200 -',
             },
+            narration: 'Moment of truth — we run it.',
+          },
+          {
+            caption: 'Read the output',
+            action: { kind: 'explain', terminal: true },
+            narration:
+              'Read the terminal from top to bottom. Flask boots, tells us the address it is listening on, and then that last line is a real request: GET slash todos, answered with a two hundred. Our little model just went over HTTP. All without leaving the editor.',
           },
         ],
         startTime: 10.5,
-        duration: 28,
-        narration:
-          'We create a models file and define a Todo with text and a done flag. In app dot py we build the Flask app, keep a list of todos, and expose a route that returns them as JSON. Highlight the route — that is the contract. Then we run the server and hit it. All without leaving the editor.',
+        duration: 60,
+        narration: 'Time to build it — watch each piece land, and where it lives.',
       },
       {
         type: 'mascot',
