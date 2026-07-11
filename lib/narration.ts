@@ -12,6 +12,7 @@ import { paceToNarration } from './dsl';
 import { DEFAULT_VOICE, NarrationEngine, SynthesizedClip, TTSPhase } from './tts';
 import { WordTiming, buildWordTimeline, SentenceClipInfo } from './word-timeline';
 import { splitSentences, hasStepNarration, stepStartsFromSentences } from './step-sync';
+import { prosodyPlan } from './prosody';
 
 export { splitSentences };
 
@@ -25,19 +26,24 @@ export interface NarrationResult {
   words: Map<number, WordTiming[]>;
 }
 
-/** Pause stitched between sentences (s) — a natural breath. */
+/** Pause stitched between sentences (s) — a natural breath. Prosody varies
+ *  the real gap per sentence around this base (see lib/prosody.ts). */
 export const SENTENCE_GAP = 0.18;
 
-/** Stitch sentence clips into one continuous clip with gaps between them. */
-export function stitchClips(clips: SynthesizedClip[]): SynthesizedClip {
+/** Stitch sentence clips into one continuous clip. `gaps[i]` is the silence
+ *  after clip i (defaults to the flat SENTENCE_GAP when not provided). */
+export function stitchClips(clips: SynthesizedClip[], gaps?: number[]): SynthesizedClip {
   const sampleRate = clips[0]?.sampleRate || 24000;
-  const gap = Math.round(SENTENCE_GAP * sampleRate);
-  const total = clips.reduce((a, c) => a + c.samples.length, 0) + gap * Math.max(0, clips.length - 1);
+  const gapAt = (i: number) => Math.round((gaps?.[i] ?? SENTENCE_GAP) * sampleRate);
+  const total = clips.reduce(
+    (a, c, i) => a + c.samples.length + (i < clips.length - 1 ? gapAt(i) : 0),
+    0,
+  );
   const samples = new Float32Array(total);
   let at = 0;
   clips.forEach((c, i) => {
     samples.set(c.samples, at);
-    at += c.samples.length + (i < clips.length - 1 ? gap : 0);
+    at += c.samples.length + (i < clips.length - 1 ? gapAt(i) : 0);
   });
   return { samples, sampleRate, duration: total / sampleRate };
 }
@@ -63,17 +69,19 @@ export async function buildNarration(
   onPhase?.({ phase: 'synthesize', done, total });
 
   for (const { i, sentences } of narrated) {
+    const plan = prosodyPlan(sentences);
+    const gaps = plan.map((p) => p.gapAfter);
     const clips: SynthesizedClip[] = [];
-    for (const sentence of sentences) {
+    for (let k = 0; k < sentences.length; k++) {
       clips.push(
-        await engine.synthesize(sentence, voice, (pct) =>
+        await engine.synthesize(sentences[k], voice, (pct) =>
           onPhase?.({ phase: 'download', pct }),
-        ),
+        plan[k].speed),
       );
       done++;
       onPhase?.({ phase: 'synthesize', done, total });
     }
-    const clip = stitchClips(clips);
+    const clip = stitchClips(clips, gaps);
     const buf = audioCtx.createBuffer(1, clip.samples.length, clip.sampleRate);
     buf.copyToChannel(clip.samples as any, 0);
     buffers.set(i, buf);
@@ -85,7 +93,7 @@ export async function buildNarration(
     let offset = 0;
     clips.forEach((c, k) => {
       infos.push({ text: sentences[k], offset, samples: c.samples, sampleRate: c.sampleRate });
-      offset += c.samples.length / c.sampleRate + SENTENCE_GAP;
+      offset += c.samples.length / c.sampleRate + gaps[k];
     });
     words.set(i, buildWordTimeline(infos));
 

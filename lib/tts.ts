@@ -101,12 +101,14 @@ export class NarrationEngine {
     text: string,
     voice: string,
     onDownloadProgress?: (pct: number) => void,
+    speed = 1,
   ): Promise<SynthesizedClip> {
-    const key = `${voice}::${text}`;
+    const key = `${voice}::${speed}::${text}`;
     const hit = this.cache.get(key);
     if (hit) return hit;
 
     if (voice.startsWith('oa:') || voice.startsWith('el:')) {
+      // premium proxies pace themselves; prosody speed applies to Kokoro only
       const clip = await this.synthesizeRemote(text, voice);
       this.cache.set(key, clip);
       return clip;
@@ -114,7 +116,7 @@ export class NarrationEngine {
 
     try {
       const tts = await this.load(onDownloadProgress);
-      const audio = await tts.generate(text, { voice });
+      const audio = await tts.generate(text, { voice, speed });
       const samples: Float32Array = audio.audio ?? audio.data;
       const sampleRate: number = audio.sampling_rate ?? 24000;
       const clip: SynthesizedClip = {

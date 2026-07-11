@@ -22,7 +22,8 @@ import { normalizeDSL, repace, paceToNarration } from '../lib/dsl';
 import { prepare, renderFrame } from '../lib/renderer';
 import { Conductor } from '../lib/conductor';
 import { SfxCollector, SfxEvent, SampleBuffers } from '../lib/sounds';
-import { SENTENCE_GAP, splitSentences, stitchClips } from '../lib/narration';
+import { splitSentences, stitchClips } from '../lib/narration';
+import { prosodyPlan } from '../lib/prosody';
 import { hasStepNarration, stepStartsFromSentences } from '../lib/step-sync';
 import { SynthesizedClip } from '../lib/tts';
 import { WordTiming, buildWordTimeline, SentenceClipInfo } from '../lib/word-timeline';
@@ -158,14 +159,15 @@ async function synthesizeNarration(dsl: AnimationDSL, voice: string) {
   } as any);
 
   const cache = new Map<string, SynthesizedClip>();
-  const synth = async (text: string): Promise<SynthesizedClip> => {
-    const hit = cache.get(text);
+  const synth = async (text: string, speed = 1): Promise<SynthesizedClip> => {
+    const key = `${speed}::${text}`;
+    const hit = cache.get(key);
     if (hit) return hit;
-    const audio: any = await tts.generate(text, { voice: voice as any });
+    const audio: any = await tts.generate(text, { voice: voice as any, speed });
     const samples: Float32Array = audio.audio ?? audio.data;
     const sampleRate: number = audio.sampling_rate ?? 24000;
     const clip = { samples, sampleRate, duration: samples.length / sampleRate };
-    cache.set(text, clip);
+    cache.set(key, clip);
     return clip;
   };
 
@@ -180,17 +182,19 @@ async function synthesizeNarration(dsl: AnimationDSL, voice: string) {
   const total = narrated.reduce((a, n) => a + n.sentences.length, 0);
   let done = 0;
   for (const { i, sentences } of narrated) {
+    const plan = prosodyPlan(sentences);
+    const gaps = plan.map((p) => p.gapAfter);
     const clips: SynthesizedClip[] = [];
     const infos: SentenceClipInfo[] = [];
     let offset = 0;
-    for (const sentence of sentences) {
-      const clip = await synth(sentence);
+    for (let k = 0; k < sentences.length; k++) {
+      const clip = await synth(sentences[k], plan[k].speed);
       clips.push(clip);
-      infos.push({ text: sentence, offset, samples: clip.samples, sampleRate: clip.sampleRate });
-      offset += clip.samples.length / clip.sampleRate + SENTENCE_GAP;
+      infos.push({ text: sentences[k], offset, samples: clip.samples, sampleRate: clip.sampleRate });
+      offset += clip.samples.length / clip.sampleRate + gaps[k];
       process.stdout.write(`\rnarration ${++done}/${total}`);
     }
-    const stitched = stitchClips(clips);
+    const stitched = stitchClips(clips, gaps);
     buffers.set(i, fakeBuffer(stitched.samples, stitched.sampleRate));
     durations.set(i, stitched.duration);
     words.set(i, buildWordTimeline(infos));
