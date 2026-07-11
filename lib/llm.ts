@@ -49,8 +49,9 @@ NARRATION (the most important part):
   sentences, not fewer words.
 - HARD REQUIREMENT: on title, bullets, code, diff, quiz and diagram scenes the narration must be
   at least 2 sentences (aim for 30-70 spoken words). A one-line narration on these scenes is
-  invalid output. Across the whole lesson, aim for 350+ spoken words total — a real 2-3 minute
-  lesson, not a trailer.
+  invalid output. Across the whole lesson, aim for 700+ spoken words total — a real 4-8 minute
+  lesson, not a trailer. The ide scene alone should carry 300+ of those words via its per-step
+  narrations.
   BAD narration:  "Quick check." / "It's more concise." / "Let's start with an example."
   GOOD narration: "Before we celebrate, let's make sure this clicked. Think about what the
   comprehension actually returns. If you're not sure, that's exactly why we're checking now."
@@ -70,6 +71,23 @@ TEACHING DEPTH (what separates a great lesson from a slideshow — all four are 
 3. ANSWER "WHY NOT JUST...?": anticipate the obvious alternative a learner would ask about and
    address it head-on in narration (or a quiz).
 4. EXPLAIN THE WHY on every code beat: mechanism and consequences, not a readout of the syntax.
+
+CINEMATIC ARC (a lesson is a short film with code, not a slideshow):
+1. COLD-OPEN HOOK: the title card's narration IS the hook — a concrete failure, a surprising
+   output, or a question the learner has personally hit. Where it fits, follow immediately with
+   the problem HAPPENING (an ide type -> run whose output is wrong or ugly) before any theory.
+2. ONE PROTAGONIST EXAMPLE: a single running example threads the WHOLE lesson — every scene
+   advances or examines it. No disposable one-off snippets.
+3. RISING ACTION: the naive attempt visibly fails on screen. Let the failure breathe: a
+   "beat" scene and a "shocked" mascot before you explain.
+4. THE TURN: explain WHY it failed (viz, or highlight + explain steps), then fix it and run
+   again — the green output is the payoff. Celebrate it ("celebrate" mascot, upbeat narration).
+5. DENOUEMENT: the quiz checkpoint targets the exact failure from the arc; the recap bullets
+   call back to it ("remember when it printed nothing?").
+6. CHARACTER: Bit the mascot is a recurring character with a consistent emotional arc
+   (wave -> shocked at the failure -> think at the turn -> celebrate the fix), never decoration.
+7. CUT RHYTHM: never two static explain cards back to back — return to a full-frame surface
+   (ide/cli/browser/viz) between them. Insert a "beat" after every major reveal.
 
 SCENE TYPES (every scene needs "startTime" and "duration" in seconds; all accept "narration"):
 - title:    { "type":"title", "text":"Python f-strings", "subtitle":"a 60-second tutorial", "startTime":0, "duration":3, "narration":"..." }  — full-screen card; open the video with one and close with one.
@@ -162,6 +180,10 @@ For every title, bullets, ide, cli, browser, viz, quiz, diagram, challenge, code
 the voiceover a warm, sharp human tutor would actually say: 2-5 sentences, 30-80 spoken words.
 - Explain the REASONING: why this code, what breaks without it, what the machine really does.
 - On IDE/browser scenes: describe exactly what is on screen (typed lines, clicked button, search query, docs section) — captions and voice must agree.
+- IDE scenes: rewrite each STEP's own "narration" field (2-4 teaching sentences per step — what
+  the line does, why this way, what would break otherwise). The scene-level narration of an ide
+  scene is only a 1-2 sentence intro; the steps carry the teaching. Keep the step structure and
+  actions byte-identical.
 - On quizzes, frame the stakes without giving the answer away.
 - On recaps, connect what was learned back to the opening problem.
 - Plain speech only: no code symbols. Each sentence under ~22 words. No filler.
@@ -359,12 +381,35 @@ export async function generateDSL(
     }
   }
 
-  // Structural visual QA (logged; creators also get this in the Studio UI)
+  // Structural visual QA (logged; creators also get this in the Studio UI).
+  // Actionable structural notes (missing explain beats, silent steps, missing
+  // recap) get ONE repair round — QA that only logs never fixes anything.
   try {
     const { runVisualQA } = await import('./qa');
     const notes = runVisualQA(dsl);
     if (notes.length && !notes[0].startsWith('QA passed')) {
       console.log('[qa]', notes.join(' | '));
+      const structural = notes.filter((n) => n.includes('(ide)') || n.includes('recap'));
+      if (structural.length && criticEnabled()) {
+        try {
+          const repaired = await chatJSON(
+            SYSTEM_PROMPT,
+            `Fix ONLY these structural problems in the lesson JSON below — change nothing else, keep every other scene and field intact, and return the FULL corrected JSON:\n${structural.map((n) => `- ${n}`).join('\n')}\n\nJSON:\n${JSON.stringify(dsl)}`,
+            opts,
+          );
+          const fixed = normalizeDSL(JSON.parse(extractJSON(repaired)));
+          if (fixed.scenes.length >= dsl.scenes.length) {
+            dsl = fixed;
+            const after = runVisualQA(dsl);
+            console.log('[qa:repair]', after.length && !after[0].startsWith('QA passed') ? after.join(' | ') : 'clean');
+          } else {
+            console.log('[qa:repair] rejected — scenes shrank', fixed.scenes.length, '<', dsl.scenes.length);
+          }
+        } catch (e) {
+          // advisory only — ship what we have
+          console.log('[qa:repair] failed:', e instanceof Error ? e.message.slice(0, 200) : e);
+        }
+      }
     }
   } catch {
     // ignore

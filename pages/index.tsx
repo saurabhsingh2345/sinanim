@@ -27,6 +27,9 @@ import {
 import { AnimationDSL } from '@/lib/types';
 import { normalizeDSL, repace } from '@/lib/dsl';
 import { TEMPLATES } from '@/lib/scaffolds';
+import { THEME_IDS } from '@/lib/themes';
+import { VOICES, DEFAULT_VOICE } from '@/lib/tts';
+import { TemplateThumb } from '@/components/TemplateThumb';
 import { matchGoldTemplateId } from '@/lib/recipes';
 import { runVisualQA } from '@/lib/qa';
 import { CourseOutline } from '@/lib/course';
@@ -66,6 +69,21 @@ export default function Home() {
   const [courses, setCourses] = useState<CourseOutline[]>([]);
   const [completion, setCompletion] = useState<Record<string, number>>({});
   const [qaNotes, setQaNotes] = useState<string[]>([]);
+
+  // customization: applied to generations AND templates before Studio opens
+  const [theme, setTheme] = useState('');
+  const [voice, setVoice] = useState(DEFAULT_VOICE);
+  const [aspect, setAspect] = useState<'16:9' | '9:16'>('16:9');
+  const [depth, setDepth] = useState<'quick' | 'standard' | 'deep'>('standard');
+
+  const customize = useCallback((raw: AnimationDSL): AnimationDSL => {
+    const next: any = { ...raw };
+    if (theme) next.theme = theme;
+    if (voice) next.voice = voice;
+    if (aspect === '9:16') { next.width = 1080; next.height = 1920; }
+    else { next.width = 1920; next.height = 1080; }
+    return repace(normalizeDSL(next));
+  }, [theme, voice, aspect]);
 
   const applyDsl = useCallback((next: AnimationDSL, topicHint?: string) => {
     setDsl(next);
@@ -131,17 +149,23 @@ export default function Home() {
       if (goldId) {
         const tpl = TEMPLATES.find((t) => t.id === goldId);
         if (tpl?.ready) {
-          applyDsl(repace(normalizeDSL(tpl.build())), prompt);
+          applyDsl(customize(normalizeDSL(tpl.build())), prompt);
           setMode('video');
           window.scrollTo({ top: 0, behavior: 'smooth' });
           return;
         }
       }
+      // customization travels as authoring directives + post-processing
+      const directives: string[] = [];
+      if (theme) directives.push(`Use the "${theme}" theme pack.`);
+      if (depth === 'quick') directives.push('Keep it tight: about two minutes of speech.');
+      if (depth === 'deep') directives.push('Go deep: six to eight minutes of speech, generous explain steps, and a second quiz checkpoint.');
+      const fullPrompt = directives.length ? `${prompt}\n\n${directives.join(' ')}` : prompt;
       if (mode === 'course') {
         const res = await fetch('/api/generate-course', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, model }),
+          body: JSON.stringify({ prompt: fullPrompt, model }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Course design failed');
@@ -152,11 +176,11 @@ export default function Home() {
       const res = await fetch('/api/generate-dsl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, model }),
+        body: JSON.stringify({ prompt: fullPrompt, model }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Generation failed');
-      applyDsl(data.dsl, prompt);
+      applyDsl(customize(data.dsl), prompt);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error');
     } finally {
@@ -174,7 +198,7 @@ export default function Home() {
     if (!tpl || !tpl.ready) return;
     try {
       setError('');
-      applyDsl(repace(normalizeDSL(tpl.build())), tpl.label);
+      applyDsl(customize(normalizeDSL(tpl.build())), tpl.label);
       setMode('video');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
@@ -268,6 +292,37 @@ export default function Home() {
             </button>
           </div>
 
+          <div className="tunerow">
+            <label className="tune">
+              <span>theme</span>
+              <select value={theme} onChange={(e) => setTheme(e.target.value)}>
+                <option value="">auto</option>
+                {THEME_IDS.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </label>
+            <label className="tune">
+              <span>voice</span>
+              <select value={voice} onChange={(e) => setVoice(e.target.value)}>
+                {VOICES.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+              </select>
+            </label>
+            <label className="tune">
+              <span>aspect</span>
+              <select value={aspect} onChange={(e) => setAspect(e.target.value as '16:9' | '9:16')}>
+                <option value="16:9">16:9 wide</option>
+                <option value="9:16">9:16 shorts</option>
+              </select>
+            </label>
+            <label className="tune">
+              <span>depth</span>
+              <select value={depth} onChange={(e) => setDepth(e.target.value as 'quick' | 'standard' | 'deep')}>
+                <option value="quick">quick · ~2 min</option>
+                <option value="standard">standard · ~5 min</option>
+                <option value="deep">deep · ~8 min</option>
+              </select>
+            </label>
+          </div>
+
           {online === false && hint && (
             <div className="warn"><AlertTriangle size={14} /><div>{hint}</div></div>
           )}
@@ -306,10 +361,13 @@ export default function Home() {
                     disabled={!t.ready}
                     title={t.ready ? 'Load this template' : 'Coming soon'}
                   >
-                    <span className="ticon"><Icon size={18} /></span>
-                    <span className="ttext">
-                      <span className="ttitle">{t.label}{!t.ready && <em> · soon</em>}</span>
-                      <span className="tblurb">{t.blurb}</span>
+                    {t.ready && <TemplateThumb id={t.id} build={t.build} />}
+                    <span className="trow">
+                      <span className="ticon"><Icon size={18} /></span>
+                      <span className="ttext">
+                        <span className="ttitle">{t.label}{!t.ready && <em> · soon</em>}</span>
+                        <span className="tblurb">{t.blurb}</span>
+                      </span>
                     </span>
                   </button>
                 );
@@ -475,20 +533,46 @@ export default function Home() {
 
         .templates { margin-top: 30px; }
         .tlabel { color: var(--dimmer); font-size: 12px; text-align: center; margin-bottom: 12px; }
-        .tgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; max-width: 900px; margin: 0 auto; }
+        .tgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; max-width: 1020px; margin: 0 auto; }
         .tcard {
-          display: flex; align-items: center; gap: 12px; text-align: left;
+          display: flex; flex-direction: column; gap: 0; text-align: left;
           background: rgba(255,255,255,0.02); border: 1px solid var(--line);
-          border-radius: 14px; padding: 13px 15px; cursor: pointer; font: inherit;
-          transition: all 0.15s ease;
+          border-radius: 14px; padding: 0; cursor: pointer; font: inherit;
+          overflow: hidden; transition: all 0.15s ease;
         }
         .tcard:hover:not(:disabled) { border-color: rgba(167, 139, 250, 0.55); background: rgba(167, 139, 250, 0.06); transform: translateY(-1px); }
-        .tcard.soon { opacity: 0.5; cursor: not-allowed; }
+        .tcard.soon { opacity: 0.5; cursor: not-allowed; padding: 13px 15px; }
+        .tcard :global(.thumb) {
+          display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover;
+          border-bottom: 1px solid var(--line); background: #0d0d13;
+        }
+        .tcard :global(.thumb.skeleton) {
+          background: linear-gradient(100deg, #0d0d13 40%, #15151d 50%, #0d0d13 60%);
+          background-size: 200% 100%; animation: shimmer 1.4s infinite linear;
+        }
+        @keyframes shimmer { to { background-position: -200% 0; } }
+        .trow { display: flex; align-items: center; gap: 12px; padding: 12px 14px; min-width: 0; }
         .ticon { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 10px; background: rgba(167,139,250,0.12); color: var(--accent, #a78bfa); }
         .ttext { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
         .ttitle { color: var(--fg); font-size: 13px; font-weight: 600; }
         .ttitle em { color: var(--dimmer); font-style: normal; font-weight: 500; }
         .tblurb { color: var(--dim); font-size: 11.5px; line-height: 1.3; }
+
+        .tunerow {
+          display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;
+          margin-top: 14px;
+        }
+        .tune { display: inline-flex; align-items: center; gap: 8px; }
+        .tune span {
+          font-size: 10.5px; text-transform: uppercase; letter-spacing: 1.6px;
+          color: var(--dimmer);
+        }
+        .tune select {
+          appearance: none; background: var(--panel); color: var(--fg);
+          border: 1px solid var(--line); border-radius: 9px; padding: 6px 10px;
+          font: inherit; font-size: 12px; cursor: pointer; max-width: 190px;
+        }
+        .tune select:hover { border-color: var(--line-strong); }
 
         .result { margin-top: 44px; }
         .home-qa {

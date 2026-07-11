@@ -40,8 +40,10 @@ export function runVisualQA(dsl: AnimationDSL, topicHint?: string): string[] {
     notes.push('Coding topic missing challenge — add a hands-on beat with tests.');
   }
 
-  const lastPrimary = [...primaries].reverse()[0];
-  if (lastPrimary && lastPrimary.type !== 'bullets' && lastPrimary.type !== 'quote') {
+  // a recap bullets/quote anywhere in the last three primaries counts — the
+  // structure intentionally puts the hands-on challenge after the recap
+  const tail = primaries.slice(-3);
+  if (tail.length && !tail.some((p) => p.type === 'bullets' || p.type === 'quote')) {
     notes.push('No closing recap — end with a bullets scene summarizing takeaways.');
   }
 
@@ -109,11 +111,39 @@ export function runVisualQA(dsl: AnimationDSL, topicHint?: string): string[] {
         `Scene ${i + 1} (${s.type}): heavy code with thin narration (~${Math.round(speech)}s of voice) — the visuals will outrun the voice; narrate the reasoning line by line.`,
       );
     }
-    // six-minute rule: any single scene monologue over ~45s loses people
-    if (speech > 45) {
+    // six-minute rule: any single scene monologue over ~45s loses people.
+    // Step-narrated ide scenes are exempt — their steps re-cut the beat every
+    // few sentences, so a long scene is a sequence, not a monologue.
+    const stepNarrated = s.type === 'ide' && s.steps.some((st) => st.narration && st.narration.trim());
+    if (speech > 45 && !stepNarrated) {
       notes.push(
         `Scene ${i + 1} (${s.type}): ~${Math.round(speech)}s of continuous narration — split this beat in two.`,
       );
+    }
+    // the mandatory ide teaching rhythm: no two writes in a row, and every
+    // run gets its output read back
+    if (s.type === 'ide' && s.steps.length) {
+      const kinds = s.steps.map((st) => st.action.kind);
+      for (let j = 1; j < kinds.length; j++) {
+        if (kinds[j] === 'type' && kinds[j - 1] === 'type') {
+          notes.push(
+            `Scene ${i + 1} (ide): steps ${j} and ${j + 1} are back-to-back "type" actions — insert an "explain" step (glow the lines just typed, teach them) between writes.`,
+          );
+          break;
+        }
+      }
+      const lastRun = kinds.lastIndexOf('run');
+      if (lastRun >= 0 && !kinds.slice(lastRun + 1).some((k) => k === 'explain' || k === 'highlight')) {
+        notes.push(
+          `Scene ${i + 1} (ide): the run at step ${lastRun + 1} is never explained — add an "explain" step with "terminal": true that reads the output back and says what it MEANS.`,
+        );
+      }
+      const missing = s.steps.filter((st) => !(st.narration && st.narration.trim())).length;
+      if (missing > 0 && missing < s.steps.length) {
+        notes.push(
+          `Scene ${i + 1} (ide): ${missing} step(s) have no "narration" — every step needs 2-4 spoken sentences of its own.`,
+        );
+      }
     }
   }
   const totalWords = dsl.scenes.reduce(
