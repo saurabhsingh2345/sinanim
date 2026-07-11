@@ -27,7 +27,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       );
     }
     if (process.env.ELEVENLABS_API_KEY) {
-      voices.push({ id: 'el:21m00Tcm4TlvDq8ikWAM', label: 'Rachel · ElevenLabs (premium)' });
+      // Premade voices only — library voices (e.g. Rachel) 402 on free-tier API keys.
+      voices.push(
+        { id: 'el:Xb7hH8MSUJpSbSDYk0k2', label: 'Alice · ElevenLabs (premium)' },
+        { id: 'el:EXAVITQu4vr4xnSDxMaL', label: 'Sarah · ElevenLabs (premium)' },
+        { id: 'el:nPczCjzI2devNBz1zQrb', label: 'Brian · ElevenLabs (premium)' },
+      );
     }
     res.status(200).json({ voices });
     return;
