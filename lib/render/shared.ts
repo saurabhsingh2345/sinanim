@@ -122,6 +122,30 @@ export function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: numb
   return lines;
 }
 
+/** Wrap + auto-shrink: find the largest font size ≤ baseFs whose wrapped lines
+ *  fit maxW within maxLines. Text is NEVER cut off — it shrinks instead.
+ *  Leaves ctx.font set to the winning size. */
+export function fitLines(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxW: number,
+  baseFs: number,
+  opts?: { minFs?: number; maxLines?: number; weight?: number | string; family?: string },
+): { fs: number; lines: string[] } {
+  const family = opts?.family ?? MONO;
+  const weight = opts?.weight ?? 700;
+  const minFs = Math.max(11, opts?.minFs ?? Math.round(baseFs * 0.5));
+  const maxLines = opts?.maxLines ?? 3;
+  let fs = baseFs;
+  for (;;) {
+    ctx.font = `${weight} ${fs}px ${family}`;
+    const lines = wrapText(ctx, text, maxW);
+    const widest = lines.reduce((m, l) => Math.max(m, ctx.measureText(l).width), 0);
+    if ((lines.length <= maxLines && widest <= maxW) || fs <= minFs) return { fs, lines };
+    fs = Math.max(minFs, Math.round(fs * 0.92));
+  }
+}
+
 export const EASE: Record<Easing, (t: number) => number> = {
   linear: (t) => clamp(t, 0, 1),
   easeInOut,

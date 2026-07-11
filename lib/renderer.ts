@@ -47,7 +47,7 @@ import { parseAnsi, stripAnsi } from './ansi';
 import {
   C, IDE, ACTIVE_PACK, ACTIVE_BLOB_A, ACTIVE_BLOB_B, applyThemePack,
   MONO, CHAR_FADE, WIN_ANIM, TITLE_H, PAD, Rect,
-  roundRect, sketchRoundRect, codeFont, lineH, withAlpha, wrapText,
+  roundRect, sketchRoundRect, codeFont, lineH, withAlpha, wrapText, fitLines,
   EASE, cardAlpha, fileColor, plainTokens, revealTokenLines,
   drawMouseCursor, termLineColor, drawWindowFrame, drawTemplateCaption, langLabel,
 } from './render/shared';
@@ -1091,26 +1091,31 @@ function drawTitleCard(ctx: CanvasRenderingContext2D, scene: TitleScene, time: n
   ctx.translate(0, (1 - enter) * 22);
   ctx.textAlign = 'center';
 
-  const fs = Math.round(H / 11);
-  ctx.font = `800 ${fs}px ${MONO}`;
+  // title auto-fits: wraps to 2 lines and shrinks rather than running offscreen
+  const tf = fitLines(ctx, scene.text, W * 0.86, Math.round(H / 11), { maxLines: 2, weight: 800 });
   ctx.fillStyle = C.text;
   ctx.textBaseline = 'middle';
+  const tlh = tf.fs * 1.18;
+  const ty0 = H * 0.44 - ((tf.lines.length - 1) * tlh) / 2;
   ctx.save();
   ctx.shadowColor = withAlpha(accent, 0.35);
   ctx.shadowBlur = 60;
-  ctx.fillText(scene.text, W / 2, H * 0.44);
+  tf.lines.forEach((l, i) => ctx.fillText(l, W / 2, ty0 + i * tlh));
   ctx.restore();
-  ctx.fillText(scene.text, W / 2, H * 0.44);
+  ctx.font = `800 ${tf.fs}px ${MONO}`;
+  tf.lines.forEach((l, i) => ctx.fillText(l, W / 2, ty0 + i * tlh));
 
   // accent underline grows in
-  const lineW = Math.min(ctx.measureText(scene.text).width * 0.6, W * 0.4) * enter;
+  const lastW = ctx.measureText(tf.lines[tf.lines.length - 1]).width;
+  const underY = ty0 + (tf.lines.length - 1) * tlh + tf.fs * 0.75;
+  const lineW = Math.min(lastW * 0.6, W * 0.4) * enter;
   ctx.fillStyle = accent;
-  ctx.fillRect(W / 2 - lineW / 2, H * 0.44 + fs * 0.75, lineW, 5);
+  ctx.fillRect(W / 2 - lineW / 2, underY, lineW, 5);
 
   if (scene.subtitle) {
-    ctx.font = `500 ${Math.round(H / 30)}px ${MONO}`;
+    const sf = fitLines(ctx, scene.subtitle, W * 0.7, Math.round(H / 30), { maxLines: 2, weight: 500 });
     ctx.fillStyle = C.dim;
-    ctx.fillText(scene.subtitle, W / 2, H * 0.44 + fs * 0.75 + Math.round(H / 30) * 2.2);
+    sf.lines.forEach((l, i) => ctx.fillText(l, W / 2, underY + sf.fs * 2.2 + i * sf.fs * 1.4));
   }
   ctx.textAlign = 'left';
   ctx.restore();
@@ -1147,9 +1152,9 @@ function drawChapterCard(ctx: CanvasRenderingContext2D, scene: ChapterScene, tim
     ctx.textBaseline = 'alphabetic';
     ctx.fillText(`CHAPTER ${String(scene.number).padStart(2, '0')}`, x0 + 36, cy - H * 0.035);
   }
-  ctx.font = `700 ${Math.round(H / 14)}px ${MONO}`;
+  const cf = fitLines(ctx, scene.text, W - (x0 + 34) - W * 0.08, Math.round(H / 14), { maxLines: 2, weight: 700 });
   ctx.fillStyle = C.text;
-  ctx.fillText(scene.text, x0 + 34, cy + H * 0.045);
+  cf.lines.forEach((l, i) => ctx.fillText(l, x0 + 34, cy + H * 0.045 + i * cf.fs * 1.2));
   ctx.restore();
 }
 
@@ -1180,43 +1185,91 @@ function drawBulletsCard(ctx: CanvasRenderingContext2D, scene: BulletsScene, tim
 
   ctx.save();
   ctx.globalAlpha = a;
-  const maxW = Math.min(W * 0.58, 1150);
+  const maxW = Math.min(W * 0.62, 1240);
   const x0 = W / 2 - maxW / 2;
-  const fs = Math.round(H / 22);
-  const gapY = Math.round(fs * 2.3);
-  const titleFs = Math.round(H / 16);
-  const blockH = (scene.title ? titleFs * 2.2 : 0) + items.length * gapY;
-  let y = H / 2 - blockH / 2 + fs;
+  const titleFs = Math.round(H / 15);
+
+  // Fit pass: shrink the item font until every row (text wrapped, never cut
+  // off) and the whole block fit the frame.
+  let fs = Math.round(H / 26);
+  let rows: string[][] = [];
+  let rowHs: number[] = [];
+  let gap = 0;
+  let titleH = 0;
+  let blockH = 0;
+  for (;;) {
+    ctx.font = `500 ${fs}px ${MONO}`;
+    const textW = maxW - fs * 4.8;
+    rows = items.map((t) => wrapText(ctx, t, textW));
+    rowHs = rows.map((ls) => Math.max(fs * 2.7, ls.length * fs * 1.45 + fs * 1.25));
+    gap = Math.round(fs * 0.85);
+    titleH = scene.title ? Math.round(titleFs * 1.9) : 0;
+    blockH = titleH + rowHs.reduce((s, h) => s + h, 0) + gap * (items.length - 1);
+    if (blockH <= H * 0.84 || fs <= 15) break;
+    fs = Math.round(fs * 0.93);
+  }
+  let y = H / 2 - blockH / 2;
 
   if (scene.title) {
     const p = easeOutCubic(clamp(local / 0.5, 0, 1));
     ctx.globalAlpha = a * p;
-    ctx.font = `700 ${titleFs}px ${MONO}`;
+    const tf = fitLines(ctx, scene.title, maxW, titleFs, { maxLines: 1, weight: 700 });
+    ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = C.text;
-    ctx.fillText(scene.title, x0, y);
-    const uw = ctx.measureText(scene.title).width;
+    ctx.fillText(tf.lines[0], x0, y + tf.fs);
+    const uw = ctx.measureText(tf.lines[0]).width;
     ctx.fillStyle = C.accent;
-    ctx.fillRect(x0, y + 14, Math.min(uw * 0.4, 180) * p, 4);
-    y += titleFs * 2.2;
+    ctx.fillRect(x0, y + tf.fs + 12, Math.min(uw * 0.4, 180) * p, 4);
+    y += titleH;
   }
 
-  ctx.font = `500 ${fs}px ${MONO}`;
   for (let i = 0; i < items.length; i++) {
     const p = easeOutCubic(staggerProgress(local, i, step, 0.4, scene.title ? 0.55 : 0.2));
-    if (p <= 0) { y += gapY; continue; }
-    ctx.globalAlpha = a * p;
-    const rise = (1 - p) * 16;
+    const rowH = rowHs[i];
+    if (p > 0) {
+      ctx.globalAlpha = a * p;
+      const rise = (1 - p) * 18;
+      const ry = y + rise;
 
-    // marker: small accent square that lands with a soft pop
-    const pop = springOut(p);
-    const ms = fs * 0.42 * pop;
-    ctx.fillStyle = C.accent;
-    roundRect(ctx, x0 + fs * 0.2 - ms / 2 + fs * 0.21, y - fs * 0.36 - ms / 2 + rise, ms, ms, 3);
-    ctx.fill();
+      // panel row: soft card with a hairline border and an accent bar
+      ctx.fillStyle = C.panelTop;
+      roundRect(ctx, x0, ry, maxW, rowH, 14);
+      ctx.fill();
+      ctx.strokeStyle = C.border;
+      ctx.lineWidth = 1.2;
+      roundRect(ctx, x0, ry, maxW, rowH, 14);
+      ctx.stroke();
+      ctx.fillStyle = C.accent;
+      roundRect(ctx, x0, ry + rowH * 0.2, 4, rowH * 0.6, 2);
+      ctx.fill();
 
-    ctx.fillStyle = C.text;
-    ctx.fillText(items[i], x0 + fs * 1.6, y + rise);
-    y += gapY;
+      // numbered chip lands with a soft pop
+      const pop = springOut(p);
+      const chip = fs * 1.7 * Math.min(pop, 1.08);
+      const chipX = x0 + fs * 1.05;
+      const chipY = ry + rowH / 2 - chip / 2;
+      ctx.fillStyle = withAlpha(C.accent, 0.16);
+      roundRect(ctx, chipX, chipY, chip, chip, 8);
+      ctx.fill();
+      ctx.font = `700 ${Math.round(fs * 0.72)}px ${MONO}`;
+      ctx.fillStyle = C.accent;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(i + 1).padStart(2, '0'), chipX + chip / 2, chipY + chip / 2 + 1);
+      ctx.textAlign = 'left';
+
+      // wrapped text, vertically centered in the row — never cut off
+      ctx.font = `500 ${fs}px ${MONO}`;
+      ctx.fillStyle = C.text;
+      const lh = fs * 1.45;
+      let ty = ry + rowH / 2 - ((rows[i].length - 1) * lh) / 2;
+      for (const line of rows[i]) {
+        ctx.fillText(line, x0 + fs * 3.4, ty);
+        ty += lh;
+      }
+      ctx.textBaseline = 'alphabetic';
+    }
+    y += rowH + gap;
   }
   ctx.restore();
 }
@@ -1365,9 +1418,9 @@ function drawQuoteCard(ctx: CanvasRenderingContext2D, scene: QuoteScene, time: n
   ctx.globalAlpha = a;
   ctx.translate(0, (1 - enter) * 18);
 
-  const fs = Math.round(H / 16);
-  ctx.font = `600 ${fs}px ${MONO}`;
-  const lines = wrapText(ctx, scene.text, W * 0.62);
+  const qf = fitLines(ctx, scene.text, W * 0.62, Math.round(H / 16), { maxLines: 5, weight: 600 });
+  const fs = qf.fs;
+  const lines = qf.lines;
   const lh = fs * 1.5;
   let y = H / 2 - ((lines.length - 1) * lh) / 2;
 
@@ -1418,7 +1471,9 @@ function drawBigStatCard(ctx: CanvasRenderingContext2D, scene: BigStatScene, tim
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  const fs = Math.round(H / 4.6);
+  // value shrinks to fit rather than bleeding off the sides
+  const vf = fitLines(ctx, display, W * 0.9, Math.round(H / 4.6), { maxLines: 1, weight: 800 });
+  const fs = vf.fs;
   ctx.font = `800 ${fs}px ${MONO}`;
   ctx.save();
   ctx.shadowColor = withAlpha(C.accent, 0.4);
@@ -1427,9 +1482,9 @@ function drawBigStatCard(ctx: CanvasRenderingContext2D, scene: BigStatScene, tim
   ctx.fillText(display, W / 2, H * 0.46);
   ctx.restore();
 
-  ctx.font = `500 ${Math.round(H / 24)}px ${MONO}`;
+  const lf = fitLines(ctx, scene.label, W * 0.72, Math.round(H / 24), { maxLines: 2, weight: 500 });
   ctx.fillStyle = C.dim;
-  ctx.fillText(scene.label, W / 2, H * 0.46 + fs * 0.72);
+  lf.lines.forEach((l, i) => ctx.fillText(l, W / 2, H * 0.46 + fs * 0.72 + i * lf.fs * 1.4));
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
   ctx.restore();
@@ -1505,12 +1560,11 @@ function drawQuizCard(ctx: CanvasRenderingContext2D, scene: QuizScene, time: num
   ctx.fillStyle = C.accent;
   ctx.fillText('◆ CHECKPOINT', lay.question.x, lay.question.y + eyebrowFs);
 
-  // question (up to 2 wrapped lines)
-  const qFs = Math.round(H / 26);
-  ctx.font = `700 ${qFs}px ${MONO}`;
+  // question auto-fits its box (shrinks instead of dropping words)
+  const qf = fitLines(ctx, scene.question, lay.question.w, Math.round(H / 26), { maxLines: 2, weight: 700 });
+  const qFs = qf.fs;
   ctx.fillStyle = C.text;
-  const qLines = wrapText(ctx, scene.question, lay.question.w).slice(0, 2);
-  qLines.forEach((l, i) => {
+  qf.lines.forEach((l, i) => {
     ctx.fillText(l, lay.question.x, lay.question.y + eyebrowFs + 24 + qFs + i * qFs * 1.4);
   });
 
@@ -1553,9 +1607,11 @@ function drawQuizCard(ctx: CanvasRenderingContext2D, scene: QuizScene, time: num
     ctx.textBaseline = 'middle';
     ctx.fillText(String.fromCharCode(65 + i), r.x + 30, r.y + r.h / 2 + 1);
 
-    ctx.font = `500 ${oFs}px ${MONO}`;
+    const of = fitLines(ctx, scene.options[i], r.w - 76 - 56, oFs, { maxLines: 2, weight: 500 });
     ctx.fillStyle = C.text;
-    ctx.fillText(scene.options[i], r.x + 76, r.y + r.h / 2 + 1);
+    const olh = of.fs * 1.3;
+    const oy0 = r.y + r.h / 2 + 1 - ((of.lines.length - 1) * olh) / 2;
+    of.lines.forEach((l, li) => ctx.fillText(l, r.x + 76, oy0 + li * olh));
 
     if (revealed && isAnswer) {
       ctx.font = `700 ${oFs}px ${MONO}`;
@@ -1576,14 +1632,12 @@ function drawQuizCard(ctx: CanvasRenderingContext2D, scene: QuizScene, time: num
 
   // explanation under the card once revealed
   if (revealed && scene.explanation) {
-    const eFs = Math.round(H / 42);
-    ctx.font = `500 ${eFs}px ${MONO}`;
     ctx.globalAlpha = a * 0.9;
     ctx.fillStyle = C.dim;
     ctx.textAlign = 'center';
-    const lines = wrapText(ctx, scene.explanation, lay.card.w * 0.9);
-    lines.slice(0, 2).forEach((l, i) => {
-      ctx.fillText(l, W / 2, lay.card.y + lay.card.h + 44 + i * eFs * 1.5);
+    const ef = fitLines(ctx, scene.explanation, lay.card.w * 0.9, Math.round(H / 42), { maxLines: 3, weight: 500 });
+    ef.lines.forEach((l, i) => {
+      ctx.fillText(l, W / 2, lay.card.y + lay.card.h + 44 + i * ef.fs * 1.5);
     });
     ctx.textAlign = 'left';
   }
