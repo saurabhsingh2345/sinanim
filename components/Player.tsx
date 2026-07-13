@@ -27,7 +27,7 @@ import { exportVideo, downloadBlob } from '@/lib/export';
 import { buildNarration } from '@/lib/narration';
 import { WordTiming } from '@/lib/word-timeline';
 import { downloadCaptions } from '@/lib/captions';
-import { DEFAULT_VOICE, NarrationEngine, TTSPhase, VOICES } from '@/lib/tts';
+import { DEFAULT_VOICE, NarrationEngine, TTSPhase, VOICES, CHATTERBOX_VOICES, supportsChatterbox } from '@/lib/tts';
 import { formatTime, clamp, cx } from '@/lib/utils';
 import { QuizOverlay } from './QuizOverlay';
 import { Transcript } from './Transcript';
@@ -163,12 +163,15 @@ export function Player({
   const hasNarration = dsl.scenes.some((s) => s.narration);
   const [voiceOn, setVoiceOn] = useState(true);
   const [voice, setVoice] = useState(dsl.voice || DEFAULT_VOICE);
-  // premium tiers (OpenAI/ElevenLabs) appear when the server has keys
+  // premium tiers (OpenAI/ElevenLabs) appear when the server has keys; the
+  // in-browser Chatterbox HD tier appears when WebGPU is available.
   const [voiceList, setVoiceList] = useState(VOICES);
   useEffect(() => {
+    const local = supportsChatterbox() ? [...VOICES, ...CHATTERBOX_VOICES] : VOICES;
+    setVoiceList(local);
     fetch('/api/tts')
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d?.voices?.length) setVoiceList([...VOICES, ...d.voices]); })
+      .then((d) => { if (d?.voices?.length) setVoiceList([...local, ...d.voices]); })
       .catch(() => {});
   }, []);
   const [tts, setTts] = useState<TTSPhase>({ phase: 'idle' });
@@ -715,12 +718,79 @@ export function Player({
     }
   }, [adsl.title, exporting, pause, seek]);
 
+  // 9:16 short: derive a vertical teaser (hook + payoff), re-synthesize its
+  // narration (subset of scenes → fresh, correctly-keyed buffers), and export it
+  // as its own MP4. Reuses the same audio engine (size-independent).
+  const doExportShort = useCallback(async () => {
+    const engine = engineRef.current;
+    if (!engine || exporting) return;
+    pause();
+    setExporting(true);
+    setProgress(0);
+    try {
+      const { toShorts } = await import('@/lib/shorts');
+      const short = toShorts(adsl, { maxSeconds: 45 });
+      let effective = short;
+      let buffers = new Map<number, AudioBuffer>();
+      let words = narrWordsRef.current;
+      if (voiceOn && hasNarration && narrEngineRef.current) {
+        const res = await buildNarration({ ...short, voice }, narrEngineRef.current, engine.context, (p) => setTts(p));
+        effective = res.dsl;
+        buffers = res.buffers;
+        words = res.words;
+      }
+      const prep = await prepare(effective);
+      prep.words = words;
+      const cv = document.createElement('canvas');
+      cv.width = effective.width;
+      cv.height = effective.height;
+      const wasMuted = engine.muted;
+      engine.muted = false;
+      const { blob, ext } = await exportVideo(cv, prep, engine, setProgress, buffers);
+      engine.muted = wasMuted;
+      const safe = adsl.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+      downloadBlob(blob, `${safe || 'lesson'}-short.${ext}`);
+      seek(0);
+    } catch (e) {
+      console.error(e);
+      alert('Short export failed: ' + (e instanceof Error ? e.message : 'unknown'));
+    } finally {
+      setExporting(false);
+      setProgress(0);
+      setTts({ phase: 'ready' });
+    }
+  }, [adsl, exporting, pause, seek, voice, voiceOn, hasNarration]);
+
   // Subtitle file (.srt) from the same word timeline as the burned-in captions.
   const doCaptionFile = useCallback(() => {
     const prep = prepRef.current;
     if (!prep) return;
     const safe = adsl.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
     downloadCaptions(prep.dsl, prep.words, 'srt', `${safe || 'lesson'}.srt`);
+  }, [adsl.title]);
+
+  // Cheat-sheet still: render the lesson's cheatsheet scene (fully revealed) to a
+  // fresh canvas and download it as a PNG artifact learners can keep. Falls back
+  // to the closing scene when the lesson has no explicit cheatsheet.
+  const hasCheatsheet = adsl.scenes.some((s) => s.type === 'cheatsheet');
+  const doCheatsheetPng = useCallback(() => {
+    const prep = prepRef.current;
+    if (!prep) return;
+    const scenes = prep.dsl.scenes;
+    const scene = [...scenes].reverse().find((s) => s.type === 'cheatsheet') ?? scenes[scenes.length - 1];
+    if (!scene) return;
+    const cv = document.createElement('canvas');
+    cv.width = prep.dsl.width;
+    cv.height = prep.dsl.height;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    // a moment where the card is fully in and settled
+    renderFrame(ctx, prep, scene.startTime + Math.max(scene.duration - 0.3, scene.duration * 0.9));
+    cv.toBlob((blob) => {
+      if (!blob) return;
+      const safe = adsl.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+      downloadBlob(blob, `${safe || 'lesson'}-cheatsheet.png`);
+    }, 'image/png');
   }, [adsl.title]);
 
   const atEnd = time >= adsl.duration - 1e-3;
@@ -864,9 +934,17 @@ export function Player({
             <button className="ib" onClick={doExport} aria-label="Export video">
               <Download size={16} />
             </button>
+            <button className="ib txt" onClick={doExportShort} aria-label="Export 9:16 short">
+              9:16
+            </button>
             {hasNarration && (
               <button className="ib txt" onClick={doCaptionFile} aria-label="Download subtitles (.srt)">
                 srt
+              </button>
+            )}
+            {hasCheatsheet && (
+              <button className="ib txt" onClick={doCheatsheetPng} aria-label="Download cheat sheet (PNG)">
+                png
               </button>
             )}
             <button className="ib" onClick={toggleFullscreen} aria-label="Fullscreen">

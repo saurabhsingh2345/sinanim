@@ -61,6 +61,10 @@ export const DEFAULT_MODEL = cfg(resolveProvider()).defaultModel;
 export interface GenerateOptions {
   model?: string;
   signal?: AbortSignal;
+  /** Concepts the learner is still weak on (from FSRS, lib/mastery.ts). When set
+   *  on a follow-up lesson, the author opens with a "recall" scene reviewing one
+   *  of them — spaced review driven by the learner's actual mastery data. */
+  reviewConcepts?: string[];
 }
 
 /** Low-level: one system+user round-trip that must return JSON. Used by the

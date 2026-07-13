@@ -148,8 +148,29 @@ export async function planLesson(
   throw lastErr;
 }
 
+// HOW TO RECORD each surface well — the "director" half of the brain. The plan
+// picks WHICH surface each beat uses; this tells the writer HOW to shoot it so
+// the template actually sings instead of being filled in mechanically.
+const SURFACE_PLAYBOOK: Record<string, string> = {
+  ide: 'Build ONE file across many SMALL steps: type 3-6 lines → "explain" those lines (glow them, say why) → type more → "run" → "explain" the output with terminal:true. Type slowly and deliberately; never dump a whole file at once. The file persists and evolves — edit it in place, don\'t restart it.',
+  viz: 'Pick the structure that MATCHES the concept: array cells for iteration, pointers for two-pointer/search, a call stack for recursion, vars for an accumulator. 4-7 steps, each a FULL state with a one-line caption; let values pop and pointers glide.',
+  browser: 'For a REAL public site, use its real URL (the engine captures it live). For the lesson\'s own page, render its actual HTML. Sequence search → results → page for "look it up" beats. Name the on-screen action in narration ("we click Get started").',
+  split: 'Type HTML/CSS on the left in small steps; the live preview on the right must update to match each step exactly. Great for CSS/layout cause-and-effect.',
+  cli: '2-6 REAL commands with realistic output (the engine can run them for real). Show the scaffold → install → run rhythm; errors in red, urls tinted.',
+  api: 'Show method + URL, press Send, stream a realistic JSON response under a colored status badge. Use for one concrete HTTP call and its result.',
+  diagram: '3-6 nodes, labelled edges. Request/response between the same two nodes read as a pair (one arc each way). Introduce nodes as narration names them; pulse the flow.',
+  pr: 'A real before→after diff of the running example; review it top-to-bottom, added green / removed red, resolve with the fix.',
+  terminal: 'OUTPUT ONLY, right after a code/ide panel — never teach with it. At most one per lesson.',
+};
+
 /** The plan, rendered as a hard contract for the lesson writer. */
 export function planPromptBlock(plan: LessonPlan): string {
+  // Recording guidance for exactly the surfaces this plan uses.
+  const usedSurfaces = Array.from(new Set(plan.beats.map((b) => b.surface)));
+  const playbook = usedSurfaces
+    .map((s) => (SURFACE_PLAYBOOK[s] ? `  - ${s}: ${SURFACE_PLAYBOOK[s]}` : ''))
+    .filter(Boolean)
+    .join('\n');
   const conceptLines = plan.concepts
     .map((c) => `  - ${c.id} ("${c.label}")${c.prereqs.length ? ` after ${c.prereqs.join(', ')}` : ''} · misconception to confront: ${c.misconception}`)
     .join('\n');
@@ -166,6 +187,8 @@ ${conceptLines}
 BEAT SHEET (one scene per beat, same order; surfaces are binding):
 ${beatLines}
 CALLBACK: later narration must explicitly reference: ${plan.callback}
+HOW TO RECORD each surface this lesson uses (shoot them this way):
+${playbook}
 REGISTER RULES: "fast" → 2-3 minute lesson, dense, dry wit, cuts fast. "calm" → 4-6 minutes,
 deliberate pauses (beat scenes), intuition before formalism, one idea per scene.`;
 }

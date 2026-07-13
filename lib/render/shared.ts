@@ -59,7 +59,11 @@ export function applyThemePack(pack: ThemePack) {
 }
 
 export const MONO = "'JetBrains Mono', 'Menlo', 'Consolas', monospace";
-export const SANS = "'SF Pro Text', 'Segoe UI', 'Helvetica Neue', system-ui, sans-serif";
+// Prose / UI / labels — a real humanist sans, not a terminal font. This is the
+// single biggest lever on "looks like a polished course vs. a robot".
+export const SANS = "'Inter', 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', system-ui, sans-serif";
+// Hero display type (titles, chapters, big stats) — geometric, characterful.
+export const DISPLAY = "'Space Grotesk', 'Inter', 'SF Pro Display', system-ui, sans-serif";
 export const CHAR_FADE = 0.16; // per-character fade-in (s, terminal output)
 export const WIN_ANIM = 0.5; // window entrance (s)
 export const TITLE_H = 52;
@@ -104,6 +108,14 @@ export function lineH(fs: number) { return Math.round(fs * 1.6); }
 export function withAlpha(hex: string, a: number): string {
   const c = parseHex(hex);
   return c ? `rgba(${c.r},${c.g},${c.b},${a})` : hex;
+}
+
+/** True when the active theme is a light one (bright backdrop) — lets templates
+ *  flip hardcoded dark surfaces/highlights so text never disappears in light mode. */
+export function isLightTheme(): boolean {
+  const c = parseHex(ACTIVE_PACK.background || '#000000');
+  if (!c) return false;
+  return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b > 140;
 }
 
 /** Simple word wrap against the current ctx font. */

@@ -62,6 +62,11 @@ NARRATION (the most important part):
   would break without it, what the computer actually does.
 - Subtitles are burned in automatically from narration — do NOT duplicate narration as "text" scenes.
 - Use "text" scenes only for short punchy on-screen labels (max ~6 words), position "top-center".
+- DIALOGUE (optional, use sparingly — at most once or twice per lesson, right before a payoff):
+  a curious student can ask the exact question the learner is thinking. Tag speakers inline in the
+  narration with [student] and [teacher]; a second voice speaks the student's line. Example:
+  "So we call get with a missing key. [student] Wouldn't that throw an error? [teacher] You'd think
+  so — but it quietly returns None instead." The markers are stripped from captions automatically.
 ${SPOKEN_STYLE_RULES}
 
 TEACHING DEPTH (what separates a great lesson from a slideshow — all four are REQUIRED):
@@ -98,6 +103,8 @@ SCENE TYPES (every scene needs "startTime" and "duration" in seconds; all accept
 - viz:      { "type":"viz", "title":"Bubble sort", "vizKind":"array", "steps":[ {"caption":"Compare the first two","array":["5","2","8","1"],"compare":[0,1],"pointers":[{"name":"i","index":0}]}, {"caption":"Swap them","array":["2","5","8","1"],"done":[]}, ... ], "startTime":20, "duration":12, "narration":"..." }  — ANIMATE THE IDEA behind an algorithm, not the code. Each step carries the FULL state; the engine tweens between steps (values pop, pointers glide, stack frames push and pop). Per step you may set: "array" (cell values), "highlight"/"compare"/"done" (index arrays), "pointers" ([{name,index}] labelled arrows that walk the array), "vars" ({name:value} boxes that update, e.g. an accumulator), "stack" (bottom→top frames, for recursion/call stack). 3-8 steps. USE THIS for sorting, searching, two-pointer, loops building a value, and recursion — it makes abstract steps visible. Keep the array ≤ 10 cells. The narration should walk through the steps.
 - quote:    { "type":"quote", "text":"Explicit is better than implicit.", "attribution":"The Zen of Python", "startTime":18, "duration":4, "narration":"..." }  — big centered statement.
 - bigstat:  { "type":"bigstat", "value":"10x", "label":"faster than the naive version", "startTime":22, "duration":3.5, "narration":"..." }  — one huge number that counts up.
+- recall:   { "type":"recall", "concept":"Promises", "source":"from Lesson 2", "question":"What does a Promise represent before it resolves?", "answer":"A pending value — work running now that finishes later.", "startTime":3, "duration":6, "narration":"Quick recall. What does a Promise represent before it resolves? … A pending value." }  — a SPACED-REVIEW opener: pose a question about a PRIOR lesson's concept, hold a breath, then the answer reveals. Use ONE near the very start of a lesson that builds on earlier ones (not lesson 1). The narration must ask the question, pause ("…"), then answer.
+- cheatsheet:{ "type":"cheatsheet", "title":"Async/await — cheat sheet", "items":[ {"label":"await","code":"const x = await p","note":"Pauses until the promise settles."}, {"label":"async fn","code":"async () => {}","note":"Always returns a promise."} ], "startTime":60, "duration":10, "narration":"..." }  — an end-of-lesson TAKEAWAY card: 2-6 items, each with a "label" (concept), a short "code" snippet, and a one-line "note" (the gotcha/summary). A designed, screenshot-worthy summary. Prefer this as the CLOSING recap instead of a plain bullets card.
 - quiz:     { "type":"quiz", "question":"What does f before a string do?", "options":["Formats it","Freezes it","Makes it faster"], "answerIndex":0, "explanation":"The f prefix enables inline expressions in braces.", "startTime":26, "duration":8, "narration":"Quick check before we move on." }  — interactive checkpoint: the player pauses and waits for the learner's answer. 2-4 options; distractors must be PLAUSIBLE mistakes a real learner makes; the explanation must teach, not just confirm. Include ONE quiz after each key concept.
 - challenge: { "type":"challenge", "language":"python", "prompt":"Write a function is_even(n) that returns True for even numbers.", "starterCode":"def is_even(n):\n    # your code here\n    pass", "solution":"def is_even(n):\n    return n % 2 == 0", "tests":[{"expression":"is_even(4)","expected":"True"},{"expression":"is_even(7)","expected":"False"}], "hint":"The modulo operator % gives a remainder.", "concept":"modulo / even numbers", "startTime":30, "duration":12, "narration":"Now it's your turn — give this a real go." }  — a REAL coding challenge (Python or JavaScript only): the player pauses, the learner WRITES code, and it is executed against the tests. Each test's "expression" is evaluated right after the learner's code and its printed value is compared to "expected". Rules: 2-4 tests; "expected" must be EXACTLY what printing that expression produces (e.g. Python True/False, a list like [1, 4, 9]); "starterCode" is a clear scaffold with the signature and a TODO; "solution" must actually pass every test. Include AT MOST ONE challenge, near the end, for a hands-on concept.
 - code:     { "type":"code", "language":"python", "code":"...", "title":"main.py", "startTime":3, "duration":5, "narration":"..." }  — the code lands with an animated line cascade (fast and calm, never typed out character by character), then holds while you narrate through it.
@@ -130,8 +137,9 @@ LESSON STRUCTURE (DEFAULT — prefer this for coding topics):
 5. Optional "api" scene when teaching HTTP/REST/Flask endpoints (Postman-style).
 6. A "quiz" checkpoint after the key concept.
 7. For Python/JS hands-on topics: ONE "challenge" near the end.
-8. Closing "bullets" recap.
-9. Use "chapter"/"diagram"/"cli"/"browser"/"split"/"layout" when the topic needs those surfaces.
+8. Closing recap — prefer a "cheatsheet" card (concept + snippet + gotcha per item); a plain "bullets" recap is the fallback.
+9. If the lesson builds on an earlier one, OPEN with a "recall" card reviewing one prior concept before the title.
+10. Use "chapter"/"diagram"/"cli"/"browser"/"split"/"layout" when the topic needs those surfaces.
 Legacy "code"/"diff"/"terminal" are allowed only when a short panel morph is clearer than a full IDE — never as the default for "teach X".
 
 RULES:
@@ -451,13 +459,45 @@ export async function generateDSL(
     // ignore
   }
 
-  // Vision QA (opt-in, LLM_VISION_QA=1): render keyframes headlessly and have a
-  // vision model flag visual defects (clipped text, overlap, dead space).
+  // Vision QA (opt-in, LLM_VISION_QA=1): render keyframes headlessly, have a
+  // vision model flag visual defects (clipped text, overlap, overflow, dead
+  // space), then feed those defects into ONE repair round and RE-CRITIQUE — the
+  // fix is accepted only if it doesn't increase the defect count (closed loop).
   if (process.env.LLM_VISION_QA === '1' && typeof window === 'undefined') {
     try {
       const { visionQA } = await import('./authoring/vision-qa');
       const notes = await visionQA(dsl);
-      if (notes.length) console.log('[vision-qa]', notes.join(' | '));
+      if (notes.length) {
+        console.log('[vision-qa]', notes.join(' | '));
+        if (criticEnabled()) {
+          try {
+            const repaired = await chatJSON(
+              SYSTEM_PROMPT,
+              `A vision model reviewed rendered frames of this lesson and found these VISUAL defects. ` +
+                `Fix ONLY the named scenes by adjusting THEIR content — shorten overlong text, reduce item counts, split dense content, remove what overflows — while keeping every scene, its type, its narration, and its teaching intact. Return the FULL corrected JSON:\n` +
+                `${notes.map((n) => `- ${n}`).join('\n')}\n\nJSON:\n${JSON.stringify(dsl)}`,
+              opts,
+            );
+            const fixed = normalizeDSL(JSON.parse(extractJSON(repaired)));
+            const sameStructure =
+              fixed.scenes.length === dsl.scenes.length &&
+              fixed.scenes.every((s, i) => s.type === dsl.scenes[i].type);
+            if (sameStructure) {
+              const after = await visionQA(fixed);
+              if (after.length <= notes.length) {
+                dsl = fixed;
+                console.log('[vision-qa:repair]', after.length ? after.join(' | ') : 'clean');
+              } else {
+                console.log('[vision-qa:repair] rejected — more defects after', after.length, '>', notes.length);
+              }
+            } else {
+              console.log('[vision-qa:repair] rejected — structure changed');
+            }
+          } catch (e) {
+            console.log('[vision-qa:repair] failed:', e instanceof Error ? e.message.slice(0, 160) : e);
+          }
+        }
+      }
     } catch {
       // advisory only
     }

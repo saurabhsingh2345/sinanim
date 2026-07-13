@@ -53,6 +53,10 @@ export function sceneBeatTitle(s: Scene, index: number): string {
       return s.title || 'Evolving the code';
     case 'terminal':
       return 'Running it';
+    case 'recall':
+      return s.concept ? `Recall: ${s.concept}` : 'Quick recall';
+    case 'cheatsheet':
+      return s.title || 'Cheat sheet';
     default:
       return `Beat ${index + 1}`;
   }
@@ -81,6 +85,8 @@ export function sceneTypeLabel(type: Scene['type']): string {
     code: 'Code',
     diff: 'Diff',
     terminal: 'Terminal output',
+    recall: 'Recall',
+    cheatsheet: 'Cheat sheet',
   };
   return map[type] || type;
 }
@@ -103,6 +109,8 @@ export const INSERT_CATALOG: InsertCatalogItem[] = [
   { type: 'diff', label: 'Code diff', useWhen: 'Evolve before → after in place', group: 'code' },
   { type: 'terminal', label: 'Terminal output', useWhen: 'Show a classic run after a code panel', group: 'code' },
   { type: 'bigstat', label: 'Big number', useWhen: 'Land a memorable stat or result', group: 'teach' },
+  { type: 'recall', label: 'Recall', useWhen: 'Open a follow-up lesson by reviewing a prior concept', group: 'teach' },
+  { type: 'cheatsheet', label: 'Cheat sheet', useWhen: 'Close a lesson with concepts + snippets + gotchas', group: 'teach' },
   { type: 'quiz', label: 'Quiz', useWhen: 'Check understanding mid-lesson', group: 'check' },
   { type: 'challenge', label: 'Challenge', useWhen: 'Learner writes real code', group: 'check' },
   { type: 'mascot', label: 'Mascot', useWhen: 'Bit waves, points, or celebrates (overlay)', group: 'overlay' },
@@ -357,6 +365,29 @@ export function blankScene(type: Scene['type'], startTime: number): Scene {
         ...base,
         duration: 4,
         narration: 'That change made a huge difference.',
+      };
+    case 'recall':
+      return {
+        type: 'recall',
+        concept: 'last lesson',
+        source: 'from the previous lesson',
+        question: 'What did we build last time?',
+        answer: 'The idea this lesson builds on — edit this to match your course.',
+        ...base,
+        duration: 6,
+        narration: 'Quick recall before we start. What did we cover last time? … The idea this lesson builds on.',
+      };
+    case 'cheatsheet':
+      return {
+        type: 'cheatsheet',
+        title: 'Cheat sheet',
+        items: [
+          { label: 'Concept one', code: 'example()', note: 'One-line takeaway.' },
+          { label: 'Concept two', code: 'other()', note: 'The gotcha to remember.' },
+        ],
+        ...base,
+        duration: 9,
+        narration: 'Here is everything from this lesson in one card to screenshot and keep.',
       };
     default:
       return { type: 'wait', ...base };

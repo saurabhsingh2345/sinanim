@@ -521,6 +521,40 @@ export interface PrScene extends BaseScene {
   after: string;
 }
 
+// ── Spaced-review opener (template 24) ───────────────────────────────────────────
+// A 30-second recall beat that opens a later lesson: pose a question about an
+// earlier concept, hold a breath, then reveal the answer. Interleaved testing
+// (Szpunar) — cheap for a generator, almost nobody does it in video. The player
+// can source `concept` from FSRS (lib/mastery.ts) to review what's actually weak.
+export interface RecallScene extends BaseScene {
+  type: 'recall';
+  /** The recall question, e.g. "What does a cleanup function return?" */
+  question: string;
+  /** The answer, revealed after a deliberate pause. */
+  answer: string;
+  /** Concept tag for the learner model, e.g. "closures". */
+  concept?: string;
+  /** Where it came from, e.g. "Lesson 2". */
+  source?: string;
+}
+
+// ── Cheat-sheet summary (template 22) ────────────────────────────────────────────
+// The end-of-lesson takeaway card: the concepts, the one-line snippets, the
+// gotchas — rendered as a designed surface and exportable as a still artifact.
+export interface CheatsheetItem {
+  /** Concept / heading, e.g. "map()". */
+  label: string;
+  /** A short code snippet (rendered in mono), e.g. "arr.map(f)". */
+  code?: string;
+  /** One-line takeaway or gotcha (rendered in sans). */
+  note?: string;
+}
+export interface CheatsheetScene extends BaseScene {
+  type: 'cheatsheet';
+  title?: string;
+  items: CheatsheetItem[];
+}
+
 export type Scene =
   | CodeScene
   | TerminalScene
@@ -547,7 +581,9 @@ export type Scene =
   | SplitScene
   | ApiScene
   | PrScene
-  | LayoutScene;
+  | LayoutScene
+  | RecallScene
+  | CheatsheetScene;
 
 /** Course / lesson brand kit applied as default theme accent. */
 export interface BrandKit {
@@ -563,6 +599,7 @@ export const OVERLAY_TYPES = new Set(['mascot', 'highlight', 'text', 'sprite', '
 export const PRIMARY_CARD_TYPES = new Set([
   'title', 'chapter', 'bullets', 'diagram', 'quote', 'bigstat', 'quiz', 'challenge', 'viz',
   'ide', 'cli', 'browser', 'browserrec', 'split', 'api', 'pr', 'layout',
+  'recall', 'cheatsheet',
 ]);
 
 export interface AnimationDSL {
@@ -578,6 +615,10 @@ export interface AnimationDSL {
   brand?: BrandKit;
   /** Kokoro voice id for narration, e.g. "af_heart". */
   voice?: string;
+  /** Second voice for dialogue mode — the "student" who asks questions. Narration
+   *  segments tagged `[student]` speak in this voice; `[teacher]` (default) uses
+   *  `voice`. Defaults to a voice that contrasts with `voice` when omitted. */
+  voice2?: string;
   /** Burn narration subtitles into the frame (default true when narration exists). */
   captions?: boolean;
   /** Play keystroke / UI sound effects (default true). */

@@ -2,7 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Self-hosted variable fonts — same files the headless renderer registers, so
+   the in-browser canvas Player draws pixel-identical to server renders and we
+   drop the external Google Fonts dependency. */
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/Inter.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Space Grotesk";
+  src: url("/fonts/SpaceGrotesk.ttf") format("truetype");
+  font-weight: 300 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono.ttf") format("truetype");
+  font-weight: 100 800;
+  font-display: swap;
+}
+
 :root {
+  --sans: "Inter", "SF Pro Text", system-ui, sans-serif;
+  --display: "Space Grotesk", "Inter", system-ui, sans-serif;
   --bg: #0a0a0e;
   --bg-2: #0d0d12;
   --panel: #111118;

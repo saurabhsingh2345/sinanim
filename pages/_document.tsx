@@ -4,16 +4,11 @@ export default function Document() {
   return (
     <Html lang="en">
       <Head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
-        <link
-          href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap"
-          rel="stylesheet"
-        />
+        {/* Self-hosted variable fonts (see styles/globals.css @font-face).
+            Preload so the canvas Player has glyphs before first paint. */}
+        <link rel="preload" href="/fonts/Inter.ttf" as="font" type="font/ttf" crossOrigin="anonymous" />
+        <link rel="preload" href="/fonts/SpaceGrotesk.ttf" as="font" type="font/ttf" crossOrigin="anonymous" />
+        <link rel="preload" href="/fonts/JetBrainsMono.ttf" as="font" type="font/ttf" crossOrigin="anonymous" />
         <meta
           name="description"
           content="Turn a prompt into a clean, exportable code-animation video — powered by local open-source models."

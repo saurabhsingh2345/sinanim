@@ -5,8 +5,10 @@ import {
   BrowserRecScene,
   BrowserScene,
   BulletsScene,
+  CheatsheetScene,
   CliScene,
   PrScene,
+  RecallScene,
   SplitScene,
   ChallengeScene,
   ChapterScene,
@@ -51,8 +53,8 @@ import {
 import { parseAnsi, stripAnsi } from './ansi';
 import {
   C, IDE, ACTIVE_PACK, ACTIVE_BLOB_A, ACTIVE_BLOB_B, applyThemePack,
-  MONO, CHAR_FADE, WIN_ANIM, TITLE_H, PAD, Rect,
-  roundRect, sketchRoundRect, codeFont, lineH, withAlpha, wrapText, fitLines,
+  MONO, SANS, DISPLAY, CHAR_FADE, WIN_ANIM, TITLE_H, PAD, Rect,
+  roundRect, sketchRoundRect, codeFont, lineH, withAlpha, isLightTheme, wrapText, fitLines,
   EASE, cardAlpha, fileColor, plainTokens, revealTokenLines,
   drawMouseCursor, termLineColor, drawWindowFrame, drawTemplateCaption, langLabel,
 } from './render/shared';
@@ -558,7 +560,14 @@ function errorShake(prep: Prepared, time: number): ShakeOffset {
 // ── Backdrop: layered, slowly-drifting color field ─────────────────────────────
 function drawBackdrop(ctx: CanvasRenderingContext2D, dsl: AnimationDSL, time: number) {
   const W = dsl.width, H = dsl.height;
-  ctx.fillStyle = ACTIVE_PACK.background || dsl.backgroundColor || '#0b0b10';
+  const base = ACTIVE_PACK.background || dsl.backgroundColor || '#0b0b10';
+  // Diagonal base gradient instead of a flat fill — a top-left lift and a deeper
+  // bottom-right give the frame quiet depth so nothing sits on dead-flat color.
+  const bg = ctx.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, mixHex(base, '#ffffff', 0.05));
+  bg.addColorStop(0.55, base);
+  bg.addColorStop(1, mixHex(base, '#000000', 0.4));
+  ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
 
   // Chapter identity: each chapter nudges the color field so the video reads as
@@ -594,6 +603,14 @@ function drawBackdrop(ctx: CanvasRenderingContext2D, dsl: AnimationDSL, time: nu
     ctx.fillStyle = wash;
     ctx.fillRect(0, 0, W, H);
   }
+
+  // Edge vignette — pulls focus to the center and stops the frame edges from
+  // reading as a hard rectangle against the video letterbox.
+  const vig = ctx.createRadialGradient(W / 2, H * 0.46, H * 0.3, W / 2, H * 0.5, H * 0.95);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.32)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, W, H);
 }
 
 /**
@@ -653,6 +670,8 @@ function drawWorld(
       case 'api': drawApiCard(ctx, card as ApiScene, time, W, H); return;
       case 'pr': drawPrCard(ctx, prep, card as PrScene, time, W, H); return;
       case 'layout': drawLayoutCard(ctx, prep, card as LayoutScene, time, W, H); return;
+      case 'recall': drawRecallCard(ctx, card as RecallScene, time, W, H); return;
+      case 'cheatsheet': drawCheatsheetCard(ctx, card as CheatsheetScene, time, W, H); return;
     }
   }
 
@@ -1244,7 +1263,7 @@ function drawCaption(ctx: CanvasRenderingContext2D, scene: TextScene, time: numb
   if (a <= 0) return;
 
   const fs = scene.fontSize || Math.round(H / 27);
-  ctx.font = `500 ${fs}px ${MONO}`;
+  ctx.font = `500 ${fs}px ${SANS}`;
   const textW = ctx.measureText(scene.content).width;
   const padX = 32, padY = 16;
   const boxW = textW + padX * 2, boxH = fs + padY * 2;
@@ -1292,17 +1311,17 @@ function drawTitleCard(ctx: CanvasRenderingContext2D, scene: TitleScene, time: n
   ctx.textAlign = 'center';
 
   // title auto-fits: wraps to 2 lines and shrinks rather than running offscreen
-  const tf = fitLines(ctx, scene.text, W * 0.86, Math.round(H / 11), { maxLines: 2, weight: 800 });
+  const tf = fitLines(ctx, scene.text, W * 0.86, Math.round(H / 10), { maxLines: 2, weight: 700, family: DISPLAY });
   ctx.fillStyle = C.text;
   ctx.textBaseline = 'middle';
-  const tlh = tf.fs * 1.18;
+  const tlh = tf.fs * 1.16;
   const ty0 = H * 0.44 - ((tf.lines.length - 1) * tlh) / 2;
   ctx.save();
   ctx.shadowColor = withAlpha(accent, 0.35);
   ctx.shadowBlur = 60;
   tf.lines.forEach((l, i) => ctx.fillText(l, W / 2, ty0 + i * tlh));
   ctx.restore();
-  ctx.font = `800 ${tf.fs}px ${MONO}`;
+  ctx.font = `700 ${tf.fs}px ${DISPLAY}`;
   tf.lines.forEach((l, i) => ctx.fillText(l, W / 2, ty0 + i * tlh));
 
   // accent underline grows in
@@ -1313,7 +1332,7 @@ function drawTitleCard(ctx: CanvasRenderingContext2D, scene: TitleScene, time: n
   ctx.fillRect(W / 2 - lineW / 2, underY, lineW, 5);
 
   if (scene.subtitle) {
-    const sf = fitLines(ctx, scene.subtitle, W * 0.7, Math.round(H / 30), { maxLines: 2, weight: 500 });
+    const sf = fitLines(ctx, scene.subtitle, W * 0.7, Math.round(H / 30), { maxLines: 2, weight: 500, family: SANS });
     ctx.fillStyle = C.dim;
     sf.lines.forEach((l, i) => ctx.fillText(l, W / 2, underY + sf.fs * 2.2 + i * sf.fs * 1.4));
   }
@@ -1335,9 +1354,9 @@ function drawChapterCard(ctx: CanvasRenderingContext2D, scene: ChapterScene, tim
 
   // ghost chapter number
   if (scene.number != null) {
-    ctx.font = `800 ${Math.round(H / 3.4)}px ${MONO}`;
+    ctx.font = `700 ${Math.round(H / 3.4)}px ${DISPLAY}`;
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(255,255,255,0.045)';
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
     ctx.fillText(String(scene.number).padStart(2, '0'), W * 0.55, cy - H * 0.02);
   }
 
@@ -1347,12 +1366,14 @@ function drawChapterCard(ctx: CanvasRenderingContext2D, scene: ChapterScene, tim
 
   ctx.translate((1 - enter) * -30, 0);
   if (scene.number != null) {
-    ctx.font = `600 ${Math.round(H / 34)}px ${MONO}`;
+    ctx.font = `600 ${Math.round(H / 36)}px ${SANS}`;
+    (ctx as any).letterSpacing = '2px';
     ctx.fillStyle = C.accent;
     ctx.textBaseline = 'alphabetic';
     ctx.fillText(`CHAPTER ${String(scene.number).padStart(2, '0')}`, x0 + 36, cy - H * 0.035);
+    (ctx as any).letterSpacing = '0px';
   }
-  const cf = fitLines(ctx, scene.text, W - (x0 + 34) - W * 0.08, Math.round(H / 14), { maxLines: 2, weight: 700 });
+  const cf = fitLines(ctx, scene.text, W - (x0 + 34) - W * 0.08, Math.round(H / 13), { maxLines: 2, weight: 600, family: DISPLAY });
   ctx.fillStyle = C.text;
   cf.lines.forEach((l, i) => ctx.fillText(l, x0 + 34, cy + H * 0.045 + i * cf.fs * 1.2));
   ctx.restore();
@@ -1398,7 +1419,7 @@ function drawBulletsCard(ctx: CanvasRenderingContext2D, scene: BulletsScene, tim
   let titleH = 0;
   let blockH = 0;
   for (;;) {
-    ctx.font = `500 ${fs}px ${MONO}`;
+    ctx.font = `500 ${fs}px ${SANS}`;
     const textW = maxW - fs * 4.8;
     rows = items.map((t) => wrapText(ctx, t, textW));
     rowHs = rows.map((ls) => Math.max(fs * 2.7, ls.length * fs * 1.45 + fs * 1.25));
@@ -1413,7 +1434,7 @@ function drawBulletsCard(ctx: CanvasRenderingContext2D, scene: BulletsScene, tim
   if (scene.title) {
     const p = easeOutCubic(clamp(local / 0.5, 0, 1));
     ctx.globalAlpha = a * p;
-    const tf = fitLines(ctx, scene.title, maxW, titleFs, { maxLines: 1, weight: 700 });
+    const tf = fitLines(ctx, scene.title, maxW, titleFs, { maxLines: 1, weight: 600, family: DISPLAY });
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = C.text;
     ctx.fillText(tf.lines[0], x0, y + tf.fs);
@@ -1451,7 +1472,7 @@ function drawBulletsCard(ctx: CanvasRenderingContext2D, scene: BulletsScene, tim
       ctx.fillStyle = withAlpha(C.accent, 0.16);
       roundRect(ctx, chipX, chipY, chip, chip, 8);
       ctx.fill();
-      ctx.font = `700 ${Math.round(fs * 0.72)}px ${MONO}`;
+      ctx.font = `700 ${Math.round(fs * 0.72)}px ${DISPLAY}`;
       ctx.fillStyle = C.accent;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -1459,7 +1480,7 @@ function drawBulletsCard(ctx: CanvasRenderingContext2D, scene: BulletsScene, tim
       ctx.textAlign = 'left';
 
       // wrapped text, vertically centered in the row — never cut off
-      ctx.font = `500 ${fs}px ${MONO}`;
+      ctx.font = `500 ${fs}px ${SANS}`;
       ctx.fillStyle = C.text;
       const lh = fs * 1.45;
       let ty = ry + rowH / 2 - ((rows[i].length - 1) * lh) / 2;
@@ -1486,7 +1507,7 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
   if (scene.title) {
     const p = easeOutCubic(clamp(local / 0.5, 0, 1));
     ctx.globalAlpha = a * p;
-    ctx.font = `700 ${Math.round(H / 20)}px ${MONO}`;
+    ctx.font = `600 ${Math.round(H / 19)}px ${DISPLAY}`;
     ctx.textAlign = 'center';
     ctx.fillStyle = C.text;
     ctx.fillText(scene.title, W / 2, H * 0.13);
@@ -1496,7 +1517,7 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
 
   // node geometry — clamp inside the frame and nudge overlaps apart so the model's
   // raw x/y fractions can't push boxes off-screen or stack them on top of each other.
-  ctx.font = `600 ${fs}px ${MONO}`;
+  ctx.font = `600 ${fs}px ${SANS}`;
   const boxes = new Map<string, Rect>();
   const margin = Math.round(W * 0.04);
   // auto-layout via dagre when the model omitted meaningful coordinates
@@ -1546,6 +1567,11 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
   const nodeAt = (i: number) => 0.35 + i * nodeStep;
   const edgesStart = nodeAt(scene.nodes.length - 1) + 0.5;
 
+  // Detect bidirectional pairs (A→B and B→A, e.g. request + response): they must
+  // bow to OPPOSITE sides so the two arcs — and their labels — never overlap.
+  const edgeKey = (a: string, b: string) => a + "|" + b;
+  const edgeSet = new Set(scene.edges.map((e) => edgeKey(e.from, e.to)));
+
   // edges draw on after their endpoints exist
   for (let i = 0; i < scene.edges.length; i++) {
     const e = scene.edges[i];
@@ -1565,9 +1591,18 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
     const sx = x1 + ux * trim1, sy = y1 + uy * trim1;
     const ex = x2 - ux * trim2, ey = y2 - uy * trim2;
 
-    // gentle quadratic bow so parallel/crossing edges read cleanly; the control
-    // point sits perpendicular to the midpoint. A bezier point at parameter t:
-    const bow = Math.min(len * 0.12, 46) * (i % 2 === 0 ? 1 : -1);
+    // Quadratic bow so parallel/crossing edges read cleanly; the control point
+    // sits perpendicular to the midpoint. Bidirectional pairs (a reverse edge
+    // exists) get a bigger, deterministically-opposite bow — the two arcs split
+    // clearly above/below the connecting line instead of overlapping. Direction
+    // keys off from/to ordering so A→B and B→A always land on opposite sides.
+    // The bow offset is bow·perp, and perp = (-uy, ux) already flips with edge
+    // direction — so a pair (A→B, B→A) with the SAME sign bows to opposite screen
+    // sides automatically. (Flipping the sign too would cancel that and overlap.)
+    const paired = edgeSet.has(edgeKey(e.to, e.from));
+    const bowMag = paired ? Math.min(len * 0.2, 78) : Math.min(len * 0.12, 46);
+    const bowSign = paired ? 1 : (i % 2 === 0 ? 1 : -1);
+    const bow = bowMag * bowSign;
     const mx = (sx + ex) / 2 - uy * bow;
     const my = (sy + ey) / 2 + ux * bow;
     const bez = (t: number) => {
@@ -1624,7 +1659,7 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
     }
     if (e.label && p > 0.6) {
       ctx.globalAlpha = a * clamp((p - 0.6) / 0.4, 0, 1);
-      ctx.font = `500 ${Math.round(fs * 0.72)}px ${MONO}`;
+      ctx.font = `500 ${Math.round(fs * 0.72)}px ${SANS}`;
       ctx.textAlign = 'center';
       const mid = bez(0.5); // sit the label on the curve, not the chord
       const lw = ctx.measureText(e.label).width;
@@ -1636,7 +1671,7 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
       ctx.fillText(e.label, mid.x, mid.y + 1);
       ctx.textBaseline = 'alphabetic';
       ctx.textAlign = 'left';
-      ctx.font = `600 ${fs}px ${MONO}`;
+      ctx.font = `600 ${fs}px ${SANS}`;
       ctx.globalAlpha = a;
     }
   }
@@ -1657,9 +1692,16 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
     ctx.translate(-cx, -cy);
 
     const accent = n.color || C.accent;
-    ctx.shadowColor = withAlpha(accent, 0.35);
+    // Theme-aware node surface: derive from the panel color so nodes are light
+    // in light themes (dark labels stay legible) and dark in dark themes — never
+    // a hardcoded dark chip with invisible text on a light background.
+    const nodeBase = C.panel;
+    const nodeTop = mixHex(nodeBase, '#ffffff', 0.06);
+    const nodeBot = mixHex(nodeBase, '#000000', 0.14);
+    const light = isLightTheme();
+    ctx.shadowColor = withAlpha(accent, light ? 0.22 : 0.35);
     ctx.shadowBlur = scene.aesthetic === 'sketch' ? 0 : 26;
-    ctx.fillStyle = '#191922';
+    ctx.fillStyle = nodeBase;
     if (scene.aesthetic === 'sketch') {
       sketchRoundRect(ctx, r.x, r.y, r.w, r.h, 13);
       ctx.fill();
@@ -1670,8 +1712,8 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
     } else {
       // gradient fill + glass top edge so the node reads as a raised chip
       const ng = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
-      ng.addColorStop(0, '#22222d');
-      ng.addColorStop(1, '#15151c');
+      ng.addColorStop(0, nodeTop);
+      ng.addColorStop(1, nodeBot);
       ctx.fillStyle = ng;
       roundRect(ctx, r.x, r.y, r.w, r.h, 13);
       ctx.fill();
@@ -1680,7 +1722,7 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
       ctx.save();
       roundRect(ctx, r.x, r.y, r.w, r.h, 13);
       ctx.clip();
-      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.fillStyle = light ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.05)';
       ctx.fillRect(r.x, r.y, r.w, 2);
       ctx.restore();
       ctx.strokeStyle = withAlpha(accent, 0.7);
@@ -1690,6 +1732,7 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
     }
     ctx.shadowBlur = 0;
     ctx.fillStyle = C.text;
+    ctx.font = `600 ${fs}px ${SANS}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(n.label, cx, cy + 1);
@@ -1710,7 +1753,7 @@ function drawQuoteCard(ctx: CanvasRenderingContext2D, scene: QuoteScene, time: n
   ctx.globalAlpha = a;
   ctx.translate(0, (1 - enter) * 18);
 
-  const qf = fitLines(ctx, scene.text, W * 0.58, Math.round(H / 16), { maxLines: 5, weight: 600 });
+  const qf = fitLines(ctx, scene.text, W * 0.58, Math.round(H / 16), { maxLines: 5, weight: 500, family: SANS });
   const fs = qf.fs;
   const lines = qf.lines;
   const lh = fs * 1.5;
@@ -1737,7 +1780,7 @@ function drawQuoteCard(ctx: CanvasRenderingContext2D, scene: QuoteScene, time: n
   ctx.fillStyle = withAlpha(C.accent, 0.25);
   ctx.fillText('“', px - fs * 0.6, py + fs * 1.1);
 
-  ctx.font = `600 ${fs}px ${MONO}`;
+  ctx.font = `500 ${fs}px ${SANS}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = C.text;
@@ -1747,7 +1790,7 @@ function drawQuoteCard(ctx: CanvasRenderingContext2D, scene: QuoteScene, time: n
     y += lh;
   }
   if (scene.attribution) {
-    ctx.font = `500 ${Math.round(H / 34)}px ${MONO}`;
+    ctx.font = `600 ${Math.round(H / 34)}px ${SANS}`;
     ctx.fillStyle = C.accent;
     ctx.fillText(`— ${scene.attribution}`, W / 2, y + fs * 0.15);
   }
@@ -1781,12 +1824,12 @@ function drawBigStatCard(ctx: CanvasRenderingContext2D, scene: BigStatScene, tim
   ctx.textBaseline = 'middle';
 
   // value shrinks to fit rather than bleeding off the sides
-  const vf = fitLines(ctx, display, W * 0.9, Math.round(H / 4.6), { maxLines: 1, weight: 800 });
+  const vf = fitLines(ctx, display, W * 0.9, Math.round(H / 4.6), { maxLines: 1, weight: 700, family: DISPLAY });
   const fs = vf.fs;
   const grow = easeOutExpo(clamp(el / 1.2, 0, 1));
 
   // hairline rules bracket the number — a designed stat, not a floating one
-  ctx.font = `800 ${fs}px ${MONO}`;
+  ctx.font = `700 ${fs}px ${DISPLAY}`;
   const vw = ctx.measureText(display).width;
   const ruleW = Math.min(vw * 1.15, W * 0.8) * grow;
   ctx.fillStyle = C.sep;
@@ -1802,11 +1845,258 @@ function drawBigStatCard(ctx: CanvasRenderingContext2D, scene: BigStatScene, tim
   ctx.fillText(display, W / 2, H * 0.46);
   ctx.restore();
 
-  const lf = fitLines(ctx, scene.label, W * 0.72, Math.round(H / 24), { maxLines: 2, weight: 500 });
+  const lf = fitLines(ctx, scene.label, W * 0.72, Math.round(H / 24), { maxLines: 2, weight: 500, family: SANS });
   ctx.fillStyle = C.dim;
   lf.lines.forEach((l, i) => ctx.fillText(l, W / 2, H * 0.46 + fs * 0.95 + i * lf.fs * 1.4));
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
+  ctx.restore();
+}
+
+// ── Recall card (spaced-review opener) ───────────────────────────────────────────
+function drawRecallCard(ctx: CanvasRenderingContext2D, scene: RecallScene, time: number, W: number, H: number) {
+  const a = cardAlpha(scene, time);
+  if (a <= 0) return;
+  const local = time - scene.startTime;
+  const enter = easeOutCubic(clamp(local / 0.6, 0, 1));
+  // answer reveals after a deliberate breath (roughly the front half of the hold)
+  const revealAt = clamp(scene.duration * 0.45, 1.6, 3.2);
+  const rp = easeOutCubic(clamp((local - revealAt) / 0.6, 0, 1));
+
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.translate(0, (1 - enter) * 20);
+
+  const panelW = Math.min(W * 0.66, 1180);
+  const px = W / 2 - panelW / 2;
+
+  // measure question + answer to size the panel
+  const qf = fitLines(ctx, scene.question, panelW - 120, Math.round(H / 15), { maxLines: 3, weight: 600, family: DISPLAY });
+  const qlh = qf.fs * 1.28;
+  ctx.font = `500 ${Math.round(H / 26)}px ${SANS}`;
+  const ansFs = Math.round(H / 26);
+  const ansLines = wrapText(ctx, scene.answer, panelW - 120);
+  const alh = ansFs * 1.4;
+  const eyebrowH = H * 0.052;
+  const dividerGap = qf.fs * 0.9;
+  const answerH = ansLines.length * alh + ansFs * 0.9;
+  const panelH = eyebrowH + qf.lines.length * qlh + dividerGap + answerH + H * 0.05;
+  const py = H / 2 - panelH / 2;
+
+  // designed panel
+  ctx.fillStyle = C.panelTop;
+  roundRect(ctx, px, py, panelW, panelH, 22);
+  ctx.fill();
+  ctx.strokeStyle = C.border;
+  ctx.lineWidth = 1.2;
+  roundRect(ctx, px, py, panelW, panelH, 22);
+  ctx.stroke();
+  ctx.fillStyle = C.accent;
+  roundRect(ctx, px, py + panelH * 0.16, 5, panelH * 0.68, 2.5);
+  ctx.fill();
+
+  const contentX = px + 52;
+  let y = py + eyebrowH + qf.fs * 0.2;
+
+  // eyebrow: a refresh badge + "SPACED REVIEW" + optional source
+  const badgeR = H * 0.02;
+  const bx = contentX + badgeR, by = py + eyebrowH * 0.62;
+  ctx.strokeStyle = withAlpha(C.accent, 0.9);
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.arc(bx, by, badgeR, Math.PI * 0.35, Math.PI * 1.9);
+  ctx.stroke();
+  // arrowhead on the loop
+  ctx.fillStyle = withAlpha(C.accent, 0.9);
+  ctx.beginPath();
+  ctx.moveTo(bx + badgeR * 0.95, by - badgeR * 0.55);
+  ctx.lineTo(bx + badgeR * 1.5, by - badgeR * 0.15);
+  ctx.lineTo(bx + badgeR * 0.7, by + badgeR * 0.1);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.font = `700 ${Math.round(H / 40)}px ${SANS}`;
+  (ctx as any).letterSpacing = '2.5px';
+  ctx.fillStyle = C.accent;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  const eyebrow = (scene.concept ? scene.concept.toUpperCase() : 'SPACED REVIEW');
+  ctx.fillText(eyebrow, contentX + badgeR * 2.2, by + 1);
+  (ctx as any).letterSpacing = '0px';
+  if (scene.source) {
+    ctx.font = `500 ${Math.round(H / 44)}px ${SANS}`;
+    ctx.fillStyle = C.dim;
+    ctx.textAlign = 'right';
+    ctx.fillText(scene.source, px + panelW - 40, by + 1);
+    ctx.textAlign = 'left';
+  }
+
+  // question
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = `600 ${qf.fs}px ${DISPLAY}`;
+  ctx.fillStyle = C.text;
+  y = py + eyebrowH + qf.fs;
+  qf.lines.forEach((l) => { ctx.fillText(l, contentX, y); y += qlh; });
+
+  // divider
+  y += dividerGap - qlh + qf.fs * 0.2;
+  ctx.fillStyle = C.sep;
+  ctx.fillRect(contentX, y, panelW - 104, 1);
+
+  // answer — reveals after the breath; a soft accent wash sweeps under it
+  if (rp > 0.01) {
+    const ay0 = y + ansFs * 1.3;
+    ctx.save();
+    ctx.globalAlpha = a * rp;
+    ctx.translate(0, (1 - rp) * 12);
+    ctx.fillStyle = withAlpha(C.accent, 0.1 * rp);
+    roundRect(ctx, contentX - 14, ay0 - ansFs, panelW - 104 + 28, answerH, 10);
+    ctx.fill();
+    ctx.font = `500 ${ansFs}px ${SANS}`;
+    ctx.fillStyle = C.text;
+    let ay = ay0;
+    ansLines.forEach((l) => { ctx.fillText(l, contentX, ay); ay += alh; });
+    ctx.restore();
+  } else {
+    // pre-reveal: a gentle pulsing "…" so the frame isn't empty during the pause
+    const pulse = 0.35 + 0.25 * Math.sin(local * 3.2);
+    ctx.font = `600 ${ansFs}px ${SANS}`;
+    ctx.fillStyle = withAlpha(C.dim, pulse);
+    ctx.fillText('…', contentX, y + ansFs * 1.6);
+  }
+  ctx.restore();
+}
+
+// ── Cheat-sheet card (end-of-lesson summary) ─────────────────────────────────────
+function drawCheatsheetCard(ctx: CanvasRenderingContext2D, scene: CheatsheetScene, time: number, W: number, H: number) {
+  const a = cardAlpha(scene, time);
+  if (a <= 0) return;
+  const local = time - scene.startTime;
+  const items = scene.items;
+  if (!items.length) return;
+
+  ctx.save();
+  ctx.globalAlpha = a;
+
+  // Portrait (9:16 shorts) can't fit two columns without crushing the code chips.
+  const portrait = H > W;
+  const cols = !portrait && items.length > 3 ? 2 : 1;
+  const rowsN = Math.ceil(items.length / cols);
+  const outerW = Math.min(W * (portrait ? 0.86 : 0.78), 1420);
+  const x0 = W / 2 - outerW / 2;
+
+  // title (reserve room for the leading sheet glyph so it never clips)
+  const titleP = easeOutCubic(clamp(local / 0.5, 0, 1));
+  const titleText = scene.title || 'Cheat sheet';
+  ctx.globalAlpha = a * titleP;
+  const titleBase = Math.round(H / (portrait ? 20 : 15));
+  const tf = fitLines(ctx, titleText, outerW - titleBase * 1.3, titleBase, { maxLines: 1, weight: 600, family: DISPLAY, minFs: Math.round(titleBase * 0.42) });
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+  const titleY = H * 0.15;
+  // small "sheet" glyph before the title
+  ctx.fillStyle = withAlpha(C.accent, 0.9);
+  const gx = x0, gy = titleY - tf.fs * 0.7, gw = tf.fs * 0.62, gh = tf.fs * 0.82;
+  roundRect(ctx, gx, gy, gw, gh, 4); ctx.fill();
+  ctx.fillStyle = withAlpha('#0b0b10', 0.55);
+  for (let i = 0; i < 3; i++) ctx.fillRect(gx + gw * 0.18, gy + gh * (0.28 + i * 0.22), gw * 0.64, gh * 0.08);
+  ctx.fillStyle = C.text;
+  ctx.font = `600 ${tf.fs}px ${DISPLAY}`;
+  ctx.fillText(tf.lines[0], x0 + gw + tf.fs * 0.5, titleY);
+  const uw = ctx.measureText(tf.lines[0]).width;
+  ctx.fillStyle = C.accent;
+  ctx.fillRect(x0 + gw + tf.fs * 0.5, titleY + 14, Math.min(uw, 260) * titleP, 4);
+  ctx.globalAlpha = a;
+
+  // grid geometry
+  const gridTop = titleY + H * 0.06;
+  const gridH = H * 0.72 - gridTop + H * 0.06;
+  const colGap = 26, rowGap = 20;
+  const cardW = (outerW - colGap * (cols - 1)) / cols;
+  const cardH = (gridH - rowGap * (rowsN - 1)) / rowsN;
+
+  const step = clamp((Math.min(scene.narrationDuration ?? scene.duration, scene.duration) - 1) / items.length, 0.28, 0.8);
+
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const p = easeOutCubic(staggerProgress(local, i, step, 0.4, 0.35));
+    if (p <= 0) continue;
+    const col = i % cols, row = Math.floor(i / cols);
+    const cx = x0 + col * (cardW + colGap);
+    const cy = gridTop + row * (cardH + rowGap);
+
+    ctx.save();
+    ctx.globalAlpha = a * p;
+    ctx.translate(0, (1 - p) * 16);
+
+    // card surface
+    const cardGrad = ctx.createLinearGradient(cx, cy, cx, cy + cardH);
+    cardGrad.addColorStop(0, withAlpha('#ffffff', 0.05));
+    cardGrad.addColorStop(1, withAlpha('#ffffff', 0.02));
+    ctx.fillStyle = cardGrad;
+    roundRect(ctx, cx, cy, cardW, cardH, 16);
+    ctx.fill();
+    ctx.strokeStyle = C.border;
+    ctx.lineWidth = 1.2;
+    roundRect(ctx, cx, cy, cardW, cardH, 16);
+    ctx.stroke();
+    ctx.fillStyle = C.accent;
+    roundRect(ctx, cx, cy + cardH * 0.22, 4, cardH * 0.56, 2);
+    ctx.fill();
+
+    // Clip all content to the card so nothing ever bleeds into a neighbour, even
+    // if a note runs long. Fonts are frame-relative (not card-relative) so they
+    // stay readable whether the card is a tall portrait row or a wide landscape one.
+    ctx.save();
+    roundRect(ctx, cx, cy, cardW, cardH, 16);
+    ctx.clip();
+
+    const pad = Math.max(16, Math.round(cardH * 0.11));
+    const ix = cx + pad + 6;
+    const avail = cardW - pad * 2 - 12;
+    const bottom = cy + cardH - pad * 0.6;
+    let iy = cy + pad;
+
+    // label
+    const labelFs = Math.round(H / (portrait ? 34 : 30));
+    ctx.font = `600 ${labelFs}px ${DISPLAY}`;
+    ctx.fillStyle = C.text;
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(it.label, ix, iy + labelFs);
+    iy += labelFs * 1.45;
+
+    // code chip (mono, inset) — shrink the font until the snippet fits the card
+    if (it.code && iy + labelFs < bottom) {
+      let codeFs = Math.round(H / (portrait ? 40 : 34));
+      ctx.font = `500 ${codeFs}px ${MONO}`;
+      while (ctx.measureText(it.code).width + 24 > avail && codeFs > 11) {
+        codeFs -= 1;
+        ctx.font = `500 ${codeFs}px ${MONO}`;
+      }
+      const cwidth = Math.min(ctx.measureText(it.code).width + 24, avail);
+      ctx.fillStyle = withAlpha('#000000', 0.28);
+      roundRect(ctx, ix, iy, cwidth, codeFs * 1.7, 7);
+      ctx.fill();
+      ctx.fillStyle = C.terminal;
+      ctx.fillText(it.code, ix + 12, iy + codeFs * 1.2);
+      iy += codeFs * 2.0;
+    }
+
+    // note (sans, dim) — only as many lines as actually fit under the code
+    if (it.note) {
+      const noteFs = Math.round(H / (portrait ? 46 : 40));
+      const nlh = noteFs * 1.32;
+      ctx.font = `400 ${noteFs}px ${SANS}`;
+      ctx.fillStyle = C.dim;
+      const maxLines = Math.max(0, Math.floor((bottom - iy) / nlh));
+      if (maxLines > 0) {
+        const noteLines = wrapText(ctx, it.note, avail).slice(0, Math.min(3, maxLines));
+        for (const nl of noteLines) { ctx.fillText(nl, ix, iy + noteFs); iy += nlh; }
+      }
+    }
+    ctx.restore(); // content clip
+    ctx.restore(); // item transform
+  }
   ctx.restore();
 }
 
@@ -1860,12 +2150,13 @@ function drawQuizCard(ctx: CanvasRenderingContext2D, scene: QuizScene, time: num
   ctx.globalAlpha = a * enter;
   ctx.translate(0, (1 - enter) * 26);
 
-  // card
+  // card (theme-aware surface — light card in light themes so text stays legible)
+  const qlight = isLightTheme();
   ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowColor = qlight ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.6)';
   ctx.shadowBlur = 70;
   ctx.shadowOffsetY = 30;
-  ctx.fillStyle = '#15151d';
+  ctx.fillStyle = qlight ? C.panel : '#15151d';
   roundRect(ctx, lay.card.x, lay.card.y, lay.card.w, lay.card.h, 22);
   ctx.fill();
   ctx.restore();
@@ -1876,12 +2167,14 @@ function drawQuizCard(ctx: CanvasRenderingContext2D, scene: QuizScene, time: num
 
   // "checkpoint" eyebrow
   const eyebrowFs = Math.round(H / 60);
-  ctx.font = `700 ${eyebrowFs}px ${MONO}`;
+  ctx.font = `700 ${eyebrowFs}px ${SANS}`;
+  (ctx as any).letterSpacing = '2px';
   ctx.fillStyle = C.accent;
   ctx.fillText('◆ CHECKPOINT', lay.question.x, lay.question.y + eyebrowFs);
+  (ctx as any).letterSpacing = '0px';
 
   // question auto-fits its box (shrinks instead of dropping words)
-  const qf = fitLines(ctx, scene.question, lay.question.w, Math.round(H / 26), { maxLines: 2, weight: 700 });
+  const qf = fitLines(ctx, scene.question, lay.question.w, Math.round(H / 26), { maxLines: 2, weight: 600, family: DISPLAY });
   const qFs = qf.fs;
   ctx.fillStyle = C.text;
   qf.lines.forEach((l, i) => {
@@ -1897,8 +2190,8 @@ function drawQuizCard(ctx: CanvasRenderingContext2D, scene: QuizScene, time: num
 
     const isAnswer = i === scene.answerIndex;
     const isSelected = selected === i;
-    let border = 'rgba(255,255,255,0.12)';
-    let fill = 'rgba(255,255,255,0.03)';
+    let border = qlight ? 'rgba(0,0,0,0.14)' : 'rgba(255,255,255,0.12)';
+    let fill = qlight ? 'rgba(0,0,0,0.02)' : 'rgba(255,255,255,0.03)';
     let badge = C.dim;
     if (revealed && isAnswer) {
       border = withAlpha(C.green, 0.8);
@@ -1922,12 +2215,12 @@ function drawQuizCard(ctx: CanvasRenderingContext2D, scene: QuizScene, time: num
     ctx.stroke();
 
     // letter badge
-    ctx.font = `700 ${oFs}px ${MONO}`;
+    ctx.font = `700 ${oFs}px ${DISPLAY}`;
     ctx.fillStyle = badge;
     ctx.textBaseline = 'middle';
     ctx.fillText(String.fromCharCode(65 + i), r.x + 30, r.y + r.h / 2 + 1);
 
-    const of = fitLines(ctx, scene.options[i], r.w - 76 - 56, oFs, { maxLines: 2, weight: 500 });
+    const of = fitLines(ctx, scene.options[i], r.w - 76 - 56, oFs, { maxLines: 2, weight: 500, family: SANS });
     ctx.fillStyle = C.text;
     const olh = of.fs * 1.3;
     const oy0 = r.y + r.h / 2 + 1 - ((of.lines.length - 1) * olh) / 2;
@@ -2179,10 +2472,14 @@ function drawVizCard(ctx: CanvasRenderingContext2D, scene: VizScene, time: numbe
     const hl = new Set(cur.highlight || []);
     const done = new Set(cur.done || []);
     const cmp = new Set(cur.compare || []);
+    // theme-aware default cell surface so values stay legible in light mode
+    const vlight = isLightTheme();
+    const cellFill = vlight ? '#ffffff' : '#1a1a24';
+    const cellBorder = vlight ? C.border : 'rgba(255,255,255,0.16)';
     for (let i = 0; i < arr.length; i++) {
       const x = cellX(i);
-      let border = 'rgba(255,255,255,0.16)';
-      let fill = '#1a1a24';
+      let border = cellBorder;
+      let fill = cellFill;
       let glow = '';
       if (done.has(i)) { border = withAlpha(C.green, 0.8); fill = withAlpha(C.green, 0.1); glow = C.green; }
       else if (cmp.has(i)) { border = withAlpha('#fbbf24', 0.85); fill = 'rgba(251,191,36,0.1)'; glow = '#fbbf24'; }
@@ -2237,7 +2534,7 @@ function drawVizCard(ctx: CanvasRenderingContext2D, scene: VizScene, time: numbe
   // ── caption ──
   if (cur.caption) {
     const fs = Math.round(H / 34);
-    ctx.font = `500 ${fs}px ${MONO}`;
+    ctx.font = `500 ${fs}px ${SANS}`;
     ctx.globalAlpha = a * (0.4 + 0.6 * tp);
     ctx.fillStyle = C.text;
     ctx.textAlign = 'center';
@@ -2261,9 +2558,10 @@ function drawVizVars(ctx: CanvasRenderingContext2D, prev: Record<string, string>
   let x = cx - totalW / 2;
   const kFs = Math.round(H / 56), vFs = Math.round(H / 38);
   ctx.textBaseline = 'alphabetic';
+  const varFill = isLightTheme() ? '#ffffff' : '#191922';
   for (const k of keys) {
     const changed = prev && prev[k] !== vars[k];
-    ctx.fillStyle = '#191922';
+    ctx.fillStyle = varFill;
     roundRect(ctx, x, top, boxW, boxH, 11);
     ctx.fill();
     ctx.strokeStyle = changed ? withAlpha(C.accent, 0.5 + 0.4 * tp) : C.border;
@@ -2352,7 +2650,7 @@ function drawVizStack(ctx: CanvasRenderingContext2D, prev: string[], cur: string
 
     ctx.save();
     ctx.globalAlpha = a;
-    ctx.fillStyle = i === (growing ? cur.length : prev.length) - 1 ? withAlpha(C.accent, 0.14) : '#191922';
+    ctx.fillStyle = i === (growing ? cur.length : prev.length) - 1 ? withAlpha(C.accent, 0.14) : (isLightTheme() ? '#ffffff' : '#191922');
     roundRect(ctx, cx - frameW / 2 + dx, y - frameH, frameW, frameH, 9);
     ctx.fill();
     ctx.strokeStyle = i === (growing ? cur.length : prev.length) - 1 ? withAlpha(C.accent, 0.7) : C.border;
@@ -2450,7 +2748,7 @@ function drawNarrationCaption(ctx: CanvasRenderingContext2D, prep: Prepared, tim
   const W = dsl.width, H = dsl.height;
   const fs = Math.round(Math.min(H / 33, W / 24));
   ctx.save();
-  ctx.font = `500 ${fs}px ${MONO}`;
+  ctx.font = `500 ${fs}px ${SANS}`;
   const space = ctx.measureText(' ').width;
   const wordWidths = page.words.map((w) => ctx.measureText(w.word).width);
   const textW = wordWidths.reduce((a, b) => a + b, 0) + space * (page.words.length - 1);
