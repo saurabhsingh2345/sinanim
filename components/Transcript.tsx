@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { AnimationDSL } from '@/lib/types';
 import { formatTime, cx } from '@/lib/utils';
+import { stripSpeakers } from '@/lib/narration';
 
 interface TranscriptProps {
   dsl: AnimationDSL;
@@ -13,7 +14,7 @@ export function Transcript({ dsl, time, onSeek }: TranscriptProps) {
   const lines = useMemo(
     () =>
       dsl.scenes
-        .map((s, i) => ({ i, at: s.startTime, text: s.narration || '' }))
+        .map((s, i) => ({ i, at: s.startTime, text: stripSpeakers(s.narration || '') }))
         .filter((l) => l.text),
     [dsl],
   );

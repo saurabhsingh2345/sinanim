@@ -615,6 +615,10 @@ export interface AnimationDSL {
   brand?: BrandKit;
   /** Kokoro voice id for narration, e.g. "af_heart". */
   voice?: string;
+  /** Second voice for dialogue mode — the "student" who asks questions. Narration
+   *  segments tagged `[student]` speak in this voice; `[teacher]` (default) uses
+   *  `voice`. Defaults to a voice that contrasts with `voice` when omitted. */
+  voice2?: string;
   /** Burn narration subtitles into the frame (default true when narration exists). */
   captions?: boolean;
   /** Play keystroke / UI sound effects (default true). */

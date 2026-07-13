@@ -62,6 +62,11 @@ NARRATION (the most important part):
   would break without it, what the computer actually does.
 - Subtitles are burned in automatically from narration — do NOT duplicate narration as "text" scenes.
 - Use "text" scenes only for short punchy on-screen labels (max ~6 words), position "top-center".
+- DIALOGUE (optional, use sparingly — at most once or twice per lesson, right before a payoff):
+  a curious student can ask the exact question the learner is thinking. Tag speakers inline in the
+  narration with [student] and [teacher]; a second voice speaks the student's line. Example:
+  "So we call get with a missing key. [student] Wouldn't that throw an error? [teacher] You'd think
+  so — but it quietly returns None instead." The markers are stripped from captions automatically.
 ${SPOKEN_STYLE_RULES}
 
 TEACHING DEPTH (what separates a great lesson from a slideshow — all four are REQUIRED):

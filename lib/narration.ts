@@ -16,6 +16,52 @@ import { prosodyPlan } from './prosody';
 
 export { splitSentences };
 
+// ── Two-voice dialogue ───────────────────────────────────────────────────────────
+// Narration can weave in a curious "student" who asks the question the learner is
+// thinking, right before the payoff. Author it with inline markers:
+//   "So what happens if the key is missing? [student] Wait, wouldn't that crash?
+//    [teacher] Good instinct — but it returns None instead."
+// Markers are stripped from captions/transcript; each sentence is synthesized in
+// its speaker's voice. With no markers, everything is the teacher (no change).
+export type Speaker = 'teacher' | 'student';
+const SPEAKER_RE = /\[(teacher|student|t|s)\]/gi;
+
+/** Remove speaker markers for display (captions, transcript). */
+export function stripSpeakers(text: string): string {
+  return text.replace(SPEAKER_RE, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Does this text actually use dialogue markers? */
+export function hasDialogue(text: string): boolean {
+  SPEAKER_RE.lastIndex = 0;
+  return SPEAKER_RE.test(text);
+}
+
+/** Split narration into sentences, each tagged with the speaker in effect. */
+export function sentencesWithSpeaker(text: string): { text: string; speaker: Speaker }[] {
+  const re = /\[(teacher|student|t|s)\]/gi;
+  const runs: { speaker: Speaker; text: string }[] = [];
+  let speaker: Speaker = 'teacher';
+  let idx = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const chunk = text.slice(idx, m.index);
+    if (chunk.trim()) runs.push({ speaker, text: chunk });
+    speaker = m[1][0].toLowerCase() === 's' ? 'student' : 'teacher';
+    idx = re.lastIndex;
+  }
+  const tail = text.slice(idx);
+  if (tail.trim()) runs.push({ speaker, text: tail });
+  const segs: { text: string; speaker: Speaker }[] = [];
+  for (const r of runs) for (const sen of splitSentences(r.text)) segs.push({ text: sen, speaker: r.speaker });
+  return segs;
+}
+
+/** A student voice that contrasts with the teacher's when none is set. */
+export function contrastVoice(teacher: string): string {
+  return /^(am_|bm_)/.test(teacher) ? 'af_heart' : 'am_michael';
+}
+
 export interface NarrationResult {
   /** The timeline re-paced so speech always fits. */
   dsl: AnimationDSL;
@@ -55,8 +101,13 @@ export async function buildNarration(
   onPhase?: (p: TTSPhase) => void,
 ): Promise<NarrationResult> {
   const voice = dsl.voice || DEFAULT_VOICE;
+  const studentVoice = dsl.voice2 || contrastVoice(voice);
+  const voiceOf = (sp: Speaker) => (sp === 'student' ? studentVoice : voice);
   const narrated = dsl.scenes
-    .map((s, i) => ({ i, sentences: splitSentences(spokenNarration(s)) }))
+    .map((s, i) => {
+      const segs = sentencesWithSpeaker(spokenNarration(s));
+      return { i, sentences: segs.map((x) => x.text), speakers: segs.map((x) => x.speaker) };
+    })
     .filter((x) => x.sentences.length > 0);
 
   const buffers = new Map<number, AudioBuffer>();
@@ -68,13 +119,13 @@ export async function buildNarration(
   let done = 0;
   onPhase?.({ phase: 'synthesize', done, total });
 
-  for (const { i, sentences } of narrated) {
+  for (const { i, sentences, speakers } of narrated) {
     const plan = prosodyPlan(sentences);
     const gaps = plan.map((p) => p.gapAfter);
     const clips: SynthesizedClip[] = [];
     for (let k = 0; k < sentences.length; k++) {
       clips.push(
-        await engine.synthesize(sentences[k], voice, (pct) =>
+        await engine.synthesize(sentences[k], voiceOf(speakers[k]), (pct) =>
           onPhase?.({ phase: 'download', pct }),
         plan[k].speed),
       );
