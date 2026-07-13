@@ -806,6 +806,35 @@ export function normalizeDSL(raw: any): AnimationDSL {
           ...base,
         };
       }
+      case 'recall':
+        return {
+          type: 'recall',
+          question: String(s.question ?? s.text ?? ''),
+          answer: String(s.answer ?? s.explanation ?? ''),
+          concept: s.concept ? String(s.concept) : undefined,
+          source: s.source ? String(s.source) : undefined,
+          ...base,
+        };
+      case 'cheatsheet': {
+        const rawItems = Array.isArray(s.items) ? s.items : [];
+        const items = rawItems
+          .map((it: any) => {
+            if (typeof it === 'string') return { label: it };
+            return {
+              label: String(it?.label ?? it?.title ?? ''),
+              code: it?.code ? String(it.code) : undefined,
+              note: it?.note ? String(it.note ?? it.body) : undefined,
+            };
+          })
+          .filter((it: any) => it.label || it.code || it.note)
+          .slice(0, 6);
+        return {
+          type: 'cheatsheet',
+          title: s.title ? String(s.title) : undefined,
+          items,
+          ...base,
+        };
+      }
       case 'beat':
         // A deliberate breath after a reveal ("And the result? … nothing.").
         // Renders as a wait, but keeps its own short default so the LLM can
@@ -959,6 +988,23 @@ export function repace(dsl: AnimationDSL): AnimationDSL {
       case 'diagram': {
         const start = cursor;
         const duration = Math.max(s.duration, 1.6 + s.nodes.length * 0.45 + s.edges.length * 0.35);
+        panelStart = start;
+        panelEnd = start + duration;
+        cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'recall': {
+        // question holds, a breath, then the answer reveals — needs room for both
+        const start = cursor;
+        const duration = Math.max(s.duration, 4.2);
+        panelStart = start;
+        panelEnd = start + duration;
+        cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'cheatsheet': {
+        const start = cursor;
+        const duration = Math.max(s.duration, 2.0 + s.items.length * 0.7);
         panelStart = start;
         panelEnd = start + duration;
         cursor = panelEnd + SECTION_GAP;

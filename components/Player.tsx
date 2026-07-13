@@ -723,6 +723,30 @@ export function Player({
     downloadCaptions(prep.dsl, prep.words, 'srt', `${safe || 'lesson'}.srt`);
   }, [adsl.title]);
 
+  // Cheat-sheet still: render the lesson's cheatsheet scene (fully revealed) to a
+  // fresh canvas and download it as a PNG artifact learners can keep. Falls back
+  // to the closing scene when the lesson has no explicit cheatsheet.
+  const hasCheatsheet = adsl.scenes.some((s) => s.type === 'cheatsheet');
+  const doCheatsheetPng = useCallback(() => {
+    const prep = prepRef.current;
+    if (!prep) return;
+    const scenes = prep.dsl.scenes;
+    const scene = [...scenes].reverse().find((s) => s.type === 'cheatsheet') ?? scenes[scenes.length - 1];
+    if (!scene) return;
+    const cv = document.createElement('canvas');
+    cv.width = prep.dsl.width;
+    cv.height = prep.dsl.height;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    // a moment where the card is fully in and settled
+    renderFrame(ctx, prep, scene.startTime + Math.max(scene.duration - 0.3, scene.duration * 0.9));
+    cv.toBlob((blob) => {
+      if (!blob) return;
+      const safe = adsl.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+      downloadBlob(blob, `${safe || 'lesson'}-cheatsheet.png`);
+    }, 'image/png');
+  }, [adsl.title]);
+
   const atEnd = time >= adsl.duration - 1e-3;
   const quizScene = quiz ? (adsl.scenes[quiz.idx] as QuizScene) : null;
   const challengeScene = challenge ? (adsl.scenes[challenge.idx] as ChallengeScene) : null;
@@ -867,6 +891,11 @@ export function Player({
             {hasNarration && (
               <button className="ib txt" onClick={doCaptionFile} aria-label="Download subtitles (.srt)">
                 srt
+              </button>
+            )}
+            {hasCheatsheet && (
+              <button className="ib txt" onClick={doCheatsheetPng} aria-label="Download cheat sheet (PNG)">
+                png
               </button>
             )}
             <button className="ib" onClick={toggleFullscreen} aria-label="Fullscreen">

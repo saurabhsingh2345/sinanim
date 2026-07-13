@@ -54,8 +54,8 @@ export function runVisualQA(dsl: AnimationDSL, topicHint?: string): string[] {
   // a recap bullets/quote anywhere in the last three primaries counts — the
   // structure intentionally puts the hands-on challenge after the recap
   const tail = primaries.slice(-3);
-  if (tail.length && !tail.some((p) => p.type === 'bullets' || p.type === 'quote')) {
-    notes.push('No closing recap — end with a bullets scene summarizing takeaways.');
+  if (tail.length && !tail.some((p) => p.type === 'bullets' || p.type === 'quote' || p.type === 'cheatsheet')) {
+    notes.push('No closing recap — end with a cheatsheet (preferred) or bullets scene summarizing takeaways.');
   }
 
   if (/\b(loop|for\s+loop|while|algorithm|sort|pointer|recurs)/.test(topic) && !dsl.scenes.some((s) => s.type === 'viz')) {

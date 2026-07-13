@@ -738,6 +738,48 @@ const CHALLENGE_DEMO = () =>
     'midnight',
   );
 
+/** New: spaced-review opener + end-of-lesson cheat sheet (templates 24 + 22). */
+const REVIEW_DEMO = () =>
+  base(
+    'Recall & cheat sheet',
+    [
+      {
+        type: 'title',
+        text: 'Lesson 3 — Async/await',
+        subtitle: 'but first, a quick recall',
+        startTime: 0,
+        duration: 3,
+        narration: 'Before we start something new, let us make sure the last lesson stuck.',
+      },
+      {
+        type: 'recall',
+        concept: 'Promises',
+        source: 'from Lesson 2',
+        question: 'What does a Promise represent before it resolves?',
+        answer: 'A pending value — work that is running now and will finish later with a result or an error.',
+        startTime: 3,
+        duration: 6,
+        narration:
+          'Quick recall from last time. What does a Promise represent before it resolves? … A pending value — work happening now that will finish later, with a result or an error.',
+      },
+      {
+        type: 'cheatsheet',
+        title: 'Async/await — cheat sheet',
+        items: [
+          { label: 'await', code: 'const x = await p', note: 'Pauses the function until the promise settles.' },
+          { label: 'async fn', code: 'async () => {}', note: 'Always returns a promise.' },
+          { label: 'try / catch', code: 'try { await p }', note: 'How you catch a rejected await.' },
+          { label: 'parallel', code: 'await Promise.all([a, b])', note: 'Run promises at once, wait for all.' },
+        ],
+        startTime: 9,
+        duration: 9,
+        narration:
+          'Here is everything in one card. Await pauses until the promise settles. An async function always returns a promise. Wrap awaits in try-catch to handle errors. And Promise-dot-all runs them in parallel.',
+      },
+    ],
+    'midnight',
+  );
+
 /** Gold pack: complete Python for/while loops lesson. */
 const PYTHON_LOOPS = () =>
   base(
@@ -1173,4 +1215,5 @@ export const TEMPLATES: TemplateDef[] = [
   { id: 'pr', label: 'PR / diff review', blurb: 'Security fix reviewed line by line', ready: true, build: PR_DEMO },
   { id: 'diagram', label: 'Request flow', blurb: 'Sketch diagram of browser → server → DB', ready: true, build: DIAGRAM_DEMO },
   { id: 'challenge', label: 'Coding challenge', blurb: 'Prompt → hands-on function with tests', ready: true, build: CHALLENGE_DEMO },
+  { id: 'review', label: 'Recall + cheat sheet', blurb: 'Spaced-review opener → end-of-lesson cheat sheet', ready: true, build: REVIEW_DEMO },
 ];

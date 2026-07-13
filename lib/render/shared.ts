@@ -59,7 +59,11 @@ export function applyThemePack(pack: ThemePack) {
 }
 
 export const MONO = "'JetBrains Mono', 'Menlo', 'Consolas', monospace";
-export const SANS = "'SF Pro Text', 'Segoe UI', 'Helvetica Neue', system-ui, sans-serif";
+// Prose / UI / labels — a real humanist sans, not a terminal font. This is the
+// single biggest lever on "looks like a polished course vs. a robot".
+export const SANS = "'Inter', 'SF Pro Text', 'Segoe UI', 'Helvetica Neue', system-ui, sans-serif";
+// Hero display type (titles, chapters, big stats) — geometric, characterful.
+export const DISPLAY = "'Space Grotesk', 'Inter', 'SF Pro Display', system-ui, sans-serif";
 export const CHAR_FADE = 0.16; // per-character fade-in (s, terminal output)
 export const WIN_ANIM = 0.5; // window entrance (s)
 export const TITLE_H = 52;

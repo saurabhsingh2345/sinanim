@@ -3,15 +3,13 @@
 // Renders representative frames from the built-in scaffolds into scripts/out/
 // and asserts the renderer is byte-deterministic (same t → identical PNG).
 
-import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
-import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { createCanvas } from '@napi-rs/canvas';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import './register-fonts.mts';
 import { normalizeDSL, repace } from '../lib/dsl';
 import { prepare, renderFrame } from '../lib/renderer';
 import { TEMPLATES } from '../lib/scaffolds';
-
-for (const p of ['/System/Library/Fonts/Menlo.ttc', '/Library/Fonts/Arial.ttf'])
-  if (existsSync(p)) { try { GlobalFonts.registerFromPath(p, 'JetBrains Mono'); } catch {} }
 
 const OUT = 'scripts/out';
 mkdirSync(OUT, { recursive: true });
