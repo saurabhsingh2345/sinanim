@@ -27,7 +27,7 @@ import { exportVideo, downloadBlob } from '@/lib/export';
 import { buildNarration } from '@/lib/narration';
 import { WordTiming } from '@/lib/word-timeline';
 import { downloadCaptions } from '@/lib/captions';
-import { DEFAULT_VOICE, NarrationEngine, TTSPhase, VOICES } from '@/lib/tts';
+import { DEFAULT_VOICE, NarrationEngine, TTSPhase, VOICES, CHATTERBOX_VOICES, supportsChatterbox } from '@/lib/tts';
 import { formatTime, clamp, cx } from '@/lib/utils';
 import { QuizOverlay } from './QuizOverlay';
 import { Transcript } from './Transcript';
@@ -163,12 +163,15 @@ export function Player({
   const hasNarration = dsl.scenes.some((s) => s.narration);
   const [voiceOn, setVoiceOn] = useState(true);
   const [voice, setVoice] = useState(dsl.voice || DEFAULT_VOICE);
-  // premium tiers (OpenAI/ElevenLabs) appear when the server has keys
+  // premium tiers (OpenAI/ElevenLabs) appear when the server has keys; the
+  // in-browser Chatterbox HD tier appears when WebGPU is available.
   const [voiceList, setVoiceList] = useState(VOICES);
   useEffect(() => {
+    const local = supportsChatterbox() ? [...VOICES, ...CHATTERBOX_VOICES] : VOICES;
+    setVoiceList(local);
     fetch('/api/tts')
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d?.voices?.length) setVoiceList([...VOICES, ...d.voices]); })
+      .then((d) => { if (d?.voices?.length) setVoiceList([...local, ...d.voices]); })
       .catch(() => {});
   }, []);
   const [tts, setTts] = useState<TTSPhase>({ phase: 'idle' });
