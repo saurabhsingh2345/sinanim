@@ -127,6 +127,11 @@ export async function generateLessonDSL(
     `Lesson title: "${entry.lesson.title}".`,
     entry.lesson.objective ? `Objective: ${entry.lesson.objective}` : '',
     `Teach exactly this: ${entry.lesson.focus}`,
+    // Spaced review: if this is a follow-up lesson and the learner's FSRS data
+    // flags weak concepts, open with a "recall" scene reviewing one of them.
+    prior.length && opts.reviewConcepts?.length
+      ? `The learner is still shaky on: ${opts.reviewConcepts.slice(0, 3).join(', ')}. OPEN the lesson with a "recall" scene that reviews ONE of these — pose a question, pause, then reveal the answer — before the title.`
+      : '',
     `Include one quiz checkpoint. End by hinting at the next lesson${
       at + 1 < all.length ? ` ("${all[at + 1].lesson.title}")` : ' — or, as this is the last lesson, recap the whole course'
     }.`,

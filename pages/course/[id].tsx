@@ -8,6 +8,7 @@ import { CourseSidebar } from '@/components/CourseSidebar';
 import { Studio } from '@/components/studio/Studio';
 import { flattenLessons } from '@/lib/course';
 import { getCourse, saveLessonDSL, saveProgress, StoredCourse } from '@/lib/store';
+import { weakConcepts } from '@/lib/mastery';
 import { AnimationDSL } from '@/lib/types';
 
 export default function CoursePage() {
@@ -64,7 +65,12 @@ export default function CoursePage() {
         const res = await fetch('/api/generate-lesson', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ outline: course.outline, lessonId: currentId }),
+          body: JSON.stringify({
+            outline: course.outline,
+            lessonId: currentId,
+            // FSRS-driven spaced review: tell the author what the learner is weak on
+            reviewConcepts: weakConcepts(5),
+          }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Lesson generation failed');
