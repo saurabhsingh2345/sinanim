@@ -85,6 +85,12 @@ function autocompleteSuggestions(lang: string, frag: string): string[] {
   return pool.filter((k) => k.toLowerCase().startsWith(lf) && k.toLowerCase() !== lf).slice(0, 4);
 }
 
+// Default typing pace (chars/sec) when a step doesn't specify one. Deliberately
+// slow — a human teacher types thoughtfully, not at machine speed — so the
+// learner can read each line as it lands. The reveal still compresses to fit a
+// short narration span, so this is the SLOWEST it types, not the fastest.
+const IDE_CPS = 13;
+
 /** Scene-relative start time of each IDE step (weighted across the voiced window). */
 export function ideStepTimes(scene: IdeScene): number[] {
   const window = Math.min(scene.narrationDuration ?? scene.duration, scene.duration);
@@ -136,7 +142,7 @@ export function ideTypedCount(scene: IdeScene, time: number): number {
     if (act.kind === 'type') {
       const prev = buffers.get(act.file) || '';
       const full = act.code;
-      const speed = act.typingSpeed ?? 26;
+      const speed = act.typingSpeed ?? IDE_CPS;
       const rv = j < k
         ? typedReveal(prev, full, 1e9, 0.001, speed)
         : typedReveal(prev, full, stepLocal, stepDur, speed);
@@ -171,7 +177,7 @@ export function ideTypedCharAt(scene: IdeScene, time: number): string {
     }
     const prev = buffers.get(st.action.file) || '';
     const full = st.action.code;
-    const rv = typedReveal(prev, full, stepLocal, stepDur, st.action.typingSpeed ?? 26);
+    const rv = typedReveal(prev, full, stepLocal, stepDur, st.action.typingSpeed ?? IDE_CPS);
     if (rv.typedNew <= 0) return '';
     const line = full.split('\n')[rv.caretLine] || '';
     return line[rv.caretCol - 1] || line[line.length - 1] || '';
@@ -304,7 +310,7 @@ function ideStateAt(scene: IdeScene, time: number): IdeState {
       see(act.file, j); openTab(act.file);
       const prev = buffers.get(act.file) || ''; const full = act.code;
       if (!done) {
-        const rv = typedReveal(prev, full, stepLocal, stepDur, act.typingSpeed ?? 26);
+        const rv = typedReveal(prev, full, stepLocal, stepDur, act.typingSpeed ?? IDE_CPS);
         typing = { file: act.file, perLine: rv.perLine, caretLine: rv.caretLine, caretCol: rv.caretCol, typedNew: rv.typedNew };
         hi = null;
       }
@@ -353,22 +359,25 @@ function ideFocusRaw(scene: IdeScene, time: number, W: number, H: number): { x: 
     // one-line vertical step barely moves the frame.
     y = L.codeTop + 8 + row * L.lh + L.lh / 2;
     x = editorMidX * 0.9;
-    zoom = 1.1;
+    zoom = 1.2; // push in on the line being written so each keystroke reads
   } else if (S.actionKind === 'run') {
-    y = L.codeTop + codeH + termH / 2; x = editorMidX; zoom = 1.1;
+    y = L.codeTop + codeH + termH / 2; x = editorMidX; zoom = 1.16;
   } else if ((S.actionKind === 'highlight' || S.actionKind === 'explain') && S.hi) {
     const total = (S.buffers.get(S.hi.file) || '').split('\n').length;
     const mid = Math.round((S.hi.start + S.hi.end) / 2) - 1;
     const scroll = codeScroll(total, mid, maxRows);
     const row = clamp(mid - scroll, 0, maxRows - 1);
-    y = L.codeTop + 8 + row * L.lh + L.lh / 2; x = editorMidX * 0.92; zoom = 1.14;
+    // dive into the lines being taught — the strongest zoom of the scene
+    const span = Math.max(1, S.hi.end - S.hi.start + 1);
+    y = L.codeTop + 8 + row * L.lh + L.lh / 2; x = editorMidX * 0.92;
+    zoom = span <= 2 ? 1.32 : span <= 4 ? 1.24 : 1.16;
   } else if (S.actionKind === 'explain' && S.term.length > 0) {
     // explaining the run's output: settle on the terminal while the voice talks
-    y = L.codeTop + codeH + termH / 2; x = editorMidX; zoom = 1.12;
+    y = L.codeTop + codeH + termH / 2; x = editorMidX; zoom = 1.2;
   } else if (S.actionKind === 'explain') {
-    x = editorMidX; y = L.codeTop + codeH * 0.45; zoom = 1.08;
+    x = editorMidX; y = L.codeTop + codeH * 0.45; zoom = 1.1;
   } else if (S.actionKind === 'open' || S.actionKind === 'create') {
-    x = L.exX + L.EXw / 2; y = L.cy + codeH / 2; zoom = 1.08;
+    x = L.exX + L.EXw / 2; y = L.cy + codeH / 2; zoom = 1.07;
   }
   return { x, y, zoom };
 }
