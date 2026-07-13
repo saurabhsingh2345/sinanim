@@ -175,6 +175,46 @@ export async function groundDSL(dsl: AnimationDSL): Promise<{ dsl: AnimationDSL;
         failures++;
       }
     }
+    else if (
+      s.type === 'api' &&
+      process.env.LLM_GROUND_API === '1' &&
+      typeof s.url === 'string' &&
+      /^https?:\/\//i.test(s.url)
+    ) {
+      // Real API grounding (opt-in): actually call the endpoint and replace the
+      // authored status/response with the REAL ones. Off by default because most
+      // demo URLs are fictional — this only helps when teaching a real public API.
+      // Fail-soft: any error (unreachable, timeout, fictional host) keeps the
+      // authored response so the lesson still plays.
+      try {
+        const u = new URL(s.url);
+        if (s.query) for (const [k, v] of Object.entries(s.query)) u.searchParams.set(k, String(v));
+        const method = String(s.method || 'GET').toUpperCase();
+        const headers: Record<string, string> = { ...(s.headers || {}) };
+        const init: RequestInit = { method, headers };
+        if (method !== 'GET' && method !== 'HEAD' && s.requestBody) {
+          init.body = s.requestBody;
+          if (!Object.keys(headers).some((h) => h.toLowerCase() === 'content-type')) {
+            headers['Content-Type'] = 'application/json';
+          }
+        }
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 6000);
+        const resp = await fetch(u.toString(), { ...init, signal: ctrl.signal });
+        clearTimeout(timer);
+        let body = await resp.text();
+        if ((resp.headers.get('content-type') || '').includes('json')) {
+          try { body = JSON.stringify(JSON.parse(body), null, 2); } catch {}
+        }
+        if (body.length > 1200) body = body.slice(0, 1200) + '\n… (truncated)';
+        s.status = resp.status;
+        s.statusText = resp.statusText || s.statusText;
+        s.response = body;
+        grounded++;
+      } catch {
+        failures++; // keep the authored response — fictional or unreachable URL
+      }
+    }
     else if (s.type === 'challenge' && s.solution && Array.isArray(s.tests) && s.tests.length) {
       // ground the challenge: set each test's `expected` to what the AUTHORED
       // solution actually prints, so a learner's correct solution can't be marked
