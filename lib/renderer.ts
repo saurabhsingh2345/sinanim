@@ -54,7 +54,7 @@ import { parseAnsi, stripAnsi } from './ansi';
 import {
   C, IDE, ACTIVE_PACK, ACTIVE_BLOB_A, ACTIVE_BLOB_B, applyThemePack,
   MONO, SANS, DISPLAY, CHAR_FADE, WIN_ANIM, TITLE_H, PAD, Rect,
-  roundRect, sketchRoundRect, codeFont, lineH, withAlpha, wrapText, fitLines,
+  roundRect, sketchRoundRect, codeFont, lineH, withAlpha, isLightTheme, wrapText, fitLines,
   EASE, cardAlpha, fileColor, plainTokens, revealTokenLines,
   drawMouseCursor, termLineColor, drawWindowFrame, drawTemplateCaption, langLabel,
 } from './render/shared';
@@ -1569,7 +1569,7 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
 
   // Detect bidirectional pairs (A→B and B→A, e.g. request + response): they must
   // bow to OPPOSITE sides so the two arcs — and their labels — never overlap.
-  const edgeKey = (a: string, b: string) => `${a} ${b}`;
+  const edgeKey = (a: string, b: string) => a + "|" + b;
   const edgeSet = new Set(scene.edges.map((e) => edgeKey(e.from, e.to)));
 
   // edges draw on after their endpoints exist
@@ -1692,9 +1692,16 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
     ctx.translate(-cx, -cy);
 
     const accent = n.color || C.accent;
-    ctx.shadowColor = withAlpha(accent, 0.35);
+    // Theme-aware node surface: derive from the panel color so nodes are light
+    // in light themes (dark labels stay legible) and dark in dark themes — never
+    // a hardcoded dark chip with invisible text on a light background.
+    const nodeBase = C.panel;
+    const nodeTop = mixHex(nodeBase, '#ffffff', 0.06);
+    const nodeBot = mixHex(nodeBase, '#000000', 0.14);
+    const light = isLightTheme();
+    ctx.shadowColor = withAlpha(accent, light ? 0.22 : 0.35);
     ctx.shadowBlur = scene.aesthetic === 'sketch' ? 0 : 26;
-    ctx.fillStyle = '#191922';
+    ctx.fillStyle = nodeBase;
     if (scene.aesthetic === 'sketch') {
       sketchRoundRect(ctx, r.x, r.y, r.w, r.h, 13);
       ctx.fill();
@@ -1705,8 +1712,8 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
     } else {
       // gradient fill + glass top edge so the node reads as a raised chip
       const ng = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
-      ng.addColorStop(0, '#22222d');
-      ng.addColorStop(1, '#15151c');
+      ng.addColorStop(0, nodeTop);
+      ng.addColorStop(1, nodeBot);
       ctx.fillStyle = ng;
       roundRect(ctx, r.x, r.y, r.w, r.h, 13);
       ctx.fill();
@@ -1715,7 +1722,7 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
       ctx.save();
       roundRect(ctx, r.x, r.y, r.w, r.h, 13);
       ctx.clip();
-      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.fillStyle = light ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.05)';
       ctx.fillRect(r.x, r.y, r.w, 2);
       ctx.restore();
       ctx.strokeStyle = withAlpha(accent, 0.7);
@@ -2143,12 +2150,13 @@ function drawQuizCard(ctx: CanvasRenderingContext2D, scene: QuizScene, time: num
   ctx.globalAlpha = a * enter;
   ctx.translate(0, (1 - enter) * 26);
 
-  // card
+  // card (theme-aware surface — light card in light themes so text stays legible)
+  const qlight = isLightTheme();
   ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowColor = qlight ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.6)';
   ctx.shadowBlur = 70;
   ctx.shadowOffsetY = 30;
-  ctx.fillStyle = '#15151d';
+  ctx.fillStyle = qlight ? C.panel : '#15151d';
   roundRect(ctx, lay.card.x, lay.card.y, lay.card.w, lay.card.h, 22);
   ctx.fill();
   ctx.restore();
@@ -2159,12 +2167,14 @@ function drawQuizCard(ctx: CanvasRenderingContext2D, scene: QuizScene, time: num
 
   // "checkpoint" eyebrow
   const eyebrowFs = Math.round(H / 60);
-  ctx.font = `700 ${eyebrowFs}px ${MONO}`;
+  ctx.font = `700 ${eyebrowFs}px ${SANS}`;
+  (ctx as any).letterSpacing = '2px';
   ctx.fillStyle = C.accent;
   ctx.fillText('◆ CHECKPOINT', lay.question.x, lay.question.y + eyebrowFs);
+  (ctx as any).letterSpacing = '0px';
 
   // question auto-fits its box (shrinks instead of dropping words)
-  const qf = fitLines(ctx, scene.question, lay.question.w, Math.round(H / 26), { maxLines: 2, weight: 700 });
+  const qf = fitLines(ctx, scene.question, lay.question.w, Math.round(H / 26), { maxLines: 2, weight: 600, family: DISPLAY });
   const qFs = qf.fs;
   ctx.fillStyle = C.text;
   qf.lines.forEach((l, i) => {
@@ -2180,8 +2190,8 @@ function drawQuizCard(ctx: CanvasRenderingContext2D, scene: QuizScene, time: num
 
     const isAnswer = i === scene.answerIndex;
     const isSelected = selected === i;
-    let border = 'rgba(255,255,255,0.12)';
-    let fill = 'rgba(255,255,255,0.03)';
+    let border = qlight ? 'rgba(0,0,0,0.14)' : 'rgba(255,255,255,0.12)';
+    let fill = qlight ? 'rgba(0,0,0,0.02)' : 'rgba(255,255,255,0.03)';
     let badge = C.dim;
     if (revealed && isAnswer) {
       border = withAlpha(C.green, 0.8);
@@ -2205,12 +2215,12 @@ function drawQuizCard(ctx: CanvasRenderingContext2D, scene: QuizScene, time: num
     ctx.stroke();
 
     // letter badge
-    ctx.font = `700 ${oFs}px ${MONO}`;
+    ctx.font = `700 ${oFs}px ${DISPLAY}`;
     ctx.fillStyle = badge;
     ctx.textBaseline = 'middle';
     ctx.fillText(String.fromCharCode(65 + i), r.x + 30, r.y + r.h / 2 + 1);
 
-    const of = fitLines(ctx, scene.options[i], r.w - 76 - 56, oFs, { maxLines: 2, weight: 500 });
+    const of = fitLines(ctx, scene.options[i], r.w - 76 - 56, oFs, { maxLines: 2, weight: 500, family: SANS });
     ctx.fillStyle = C.text;
     const olh = of.fs * 1.3;
     const oy0 = r.y + r.h / 2 + 1 - ((of.lines.length - 1) * olh) / 2;
@@ -2462,10 +2472,14 @@ function drawVizCard(ctx: CanvasRenderingContext2D, scene: VizScene, time: numbe
     const hl = new Set(cur.highlight || []);
     const done = new Set(cur.done || []);
     const cmp = new Set(cur.compare || []);
+    // theme-aware default cell surface so values stay legible in light mode
+    const vlight = isLightTheme();
+    const cellFill = vlight ? '#ffffff' : '#1a1a24';
+    const cellBorder = vlight ? C.border : 'rgba(255,255,255,0.16)';
     for (let i = 0; i < arr.length; i++) {
       const x = cellX(i);
-      let border = 'rgba(255,255,255,0.16)';
-      let fill = '#1a1a24';
+      let border = cellBorder;
+      let fill = cellFill;
       let glow = '';
       if (done.has(i)) { border = withAlpha(C.green, 0.8); fill = withAlpha(C.green, 0.1); glow = C.green; }
       else if (cmp.has(i)) { border = withAlpha('#fbbf24', 0.85); fill = 'rgba(251,191,36,0.1)'; glow = '#fbbf24'; }
@@ -2520,7 +2534,7 @@ function drawVizCard(ctx: CanvasRenderingContext2D, scene: VizScene, time: numbe
   // ── caption ──
   if (cur.caption) {
     const fs = Math.round(H / 34);
-    ctx.font = `500 ${fs}px ${MONO}`;
+    ctx.font = `500 ${fs}px ${SANS}`;
     ctx.globalAlpha = a * (0.4 + 0.6 * tp);
     ctx.fillStyle = C.text;
     ctx.textAlign = 'center';
@@ -2544,9 +2558,10 @@ function drawVizVars(ctx: CanvasRenderingContext2D, prev: Record<string, string>
   let x = cx - totalW / 2;
   const kFs = Math.round(H / 56), vFs = Math.round(H / 38);
   ctx.textBaseline = 'alphabetic';
+  const varFill = isLightTheme() ? '#ffffff' : '#191922';
   for (const k of keys) {
     const changed = prev && prev[k] !== vars[k];
-    ctx.fillStyle = '#191922';
+    ctx.fillStyle = varFill;
     roundRect(ctx, x, top, boxW, boxH, 11);
     ctx.fill();
     ctx.strokeStyle = changed ? withAlpha(C.accent, 0.5 + 0.4 * tp) : C.border;
@@ -2635,7 +2650,7 @@ function drawVizStack(ctx: CanvasRenderingContext2D, prev: string[], cur: string
 
     ctx.save();
     ctx.globalAlpha = a;
-    ctx.fillStyle = i === (growing ? cur.length : prev.length) - 1 ? withAlpha(C.accent, 0.14) : '#191922';
+    ctx.fillStyle = i === (growing ? cur.length : prev.length) - 1 ? withAlpha(C.accent, 0.14) : (isLightTheme() ? '#ffffff' : '#191922');
     roundRect(ctx, cx - frameW / 2 + dx, y - frameH, frameW, frameH, 9);
     ctx.fill();
     ctx.strokeStyle = i === (growing ? cur.length : prev.length) - 1 ? withAlpha(C.accent, 0.7) : C.border;

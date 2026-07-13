@@ -110,6 +110,14 @@ export function withAlpha(hex: string, a: number): string {
   return c ? `rgba(${c.r},${c.g},${c.b},${a})` : hex;
 }
 
+/** True when the active theme is a light one (bright backdrop) — lets templates
+ *  flip hardcoded dark surfaces/highlights so text never disappears in light mode. */
+export function isLightTheme(): boolean {
+  const c = parseHex(ACTIVE_PACK.background || '#000000');
+  if (!c) return false;
+  return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b > 140;
+}
+
 /** Simple word wrap against the current ctx font. */
 export function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
   const words = text.split(/\s+/).filter(Boolean);
