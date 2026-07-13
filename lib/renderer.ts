@@ -1567,6 +1567,11 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
   const nodeAt = (i: number) => 0.35 + i * nodeStep;
   const edgesStart = nodeAt(scene.nodes.length - 1) + 0.5;
 
+  // Detect bidirectional pairs (A→B and B→A, e.g. request + response): they must
+  // bow to OPPOSITE sides so the two arcs — and their labels — never overlap.
+  const edgeKey = (a: string, b: string) => `${a} ${b}`;
+  const edgeSet = new Set(scene.edges.map((e) => edgeKey(e.from, e.to)));
+
   // edges draw on after their endpoints exist
   for (let i = 0; i < scene.edges.length; i++) {
     const e = scene.edges[i];
@@ -1586,9 +1591,18 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
     const sx = x1 + ux * trim1, sy = y1 + uy * trim1;
     const ex = x2 - ux * trim2, ey = y2 - uy * trim2;
 
-    // gentle quadratic bow so parallel/crossing edges read cleanly; the control
-    // point sits perpendicular to the midpoint. A bezier point at parameter t:
-    const bow = Math.min(len * 0.12, 46) * (i % 2 === 0 ? 1 : -1);
+    // Quadratic bow so parallel/crossing edges read cleanly; the control point
+    // sits perpendicular to the midpoint. Bidirectional pairs (a reverse edge
+    // exists) get a bigger, deterministically-opposite bow — the two arcs split
+    // clearly above/below the connecting line instead of overlapping. Direction
+    // keys off from/to ordering so A→B and B→A always land on opposite sides.
+    // The bow offset is bow·perp, and perp = (-uy, ux) already flips with edge
+    // direction — so a pair (A→B, B→A) with the SAME sign bows to opposite screen
+    // sides automatically. (Flipping the sign too would cancel that and overlap.)
+    const paired = edgeSet.has(edgeKey(e.to, e.from));
+    const bowMag = paired ? Math.min(len * 0.2, 78) : Math.min(len * 0.12, 46);
+    const bowSign = paired ? 1 : (i % 2 === 0 ? 1 : -1);
+    const bow = bowMag * bowSign;
     const mx = (sx + ex) / 2 - uy * bow;
     const my = (sy + ey) / 2 + ux * bow;
     const bez = (t: number) => {
