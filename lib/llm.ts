@@ -454,13 +454,45 @@ export async function generateDSL(
     // ignore
   }
 
-  // Vision QA (opt-in, LLM_VISION_QA=1): render keyframes headlessly and have a
-  // vision model flag visual defects (clipped text, overlap, dead space).
+  // Vision QA (opt-in, LLM_VISION_QA=1): render keyframes headlessly, have a
+  // vision model flag visual defects (clipped text, overlap, overflow, dead
+  // space), then feed those defects into ONE repair round and RE-CRITIQUE — the
+  // fix is accepted only if it doesn't increase the defect count (closed loop).
   if (process.env.LLM_VISION_QA === '1' && typeof window === 'undefined') {
     try {
       const { visionQA } = await import('./authoring/vision-qa');
       const notes = await visionQA(dsl);
-      if (notes.length) console.log('[vision-qa]', notes.join(' | '));
+      if (notes.length) {
+        console.log('[vision-qa]', notes.join(' | '));
+        if (criticEnabled()) {
+          try {
+            const repaired = await chatJSON(
+              SYSTEM_PROMPT,
+              `A vision model reviewed rendered frames of this lesson and found these VISUAL defects. ` +
+                `Fix ONLY the named scenes by adjusting THEIR content — shorten overlong text, reduce item counts, split dense content, remove what overflows — while keeping every scene, its type, its narration, and its teaching intact. Return the FULL corrected JSON:\n` +
+                `${notes.map((n) => `- ${n}`).join('\n')}\n\nJSON:\n${JSON.stringify(dsl)}`,
+              opts,
+            );
+            const fixed = normalizeDSL(JSON.parse(extractJSON(repaired)));
+            const sameStructure =
+              fixed.scenes.length === dsl.scenes.length &&
+              fixed.scenes.every((s, i) => s.type === dsl.scenes[i].type);
+            if (sameStructure) {
+              const after = await visionQA(fixed);
+              if (after.length <= notes.length) {
+                dsl = fixed;
+                console.log('[vision-qa:repair]', after.length ? after.join(' | ') : 'clean');
+              } else {
+                console.log('[vision-qa:repair] rejected — more defects after', after.length, '>', notes.length);
+              }
+            } else {
+              console.log('[vision-qa:repair] rejected — structure changed');
+            }
+          } catch (e) {
+            console.log('[vision-qa:repair] failed:', e instanceof Error ? e.message.slice(0, 160) : e);
+          }
+        }
+      }
     } catch {
       // advisory only
     }

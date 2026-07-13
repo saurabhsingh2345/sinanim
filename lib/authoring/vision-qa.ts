@@ -26,41 +26,55 @@ const VISION_PROMPT = `You are reviewing frames of an animated coding lesson for
 Checks (report ONLY clear failures — an empty issues array is the normal, expected answer):
 ${CHECKS.map((c) => `- ${c}`).join('\n')}`;
 
-/** Pick the moments worth looking at: mid-flight of each primary card. */
-function keyframeTimes(dsl: AnimationDSL, max = 4): number[] {
-  const times: number[] = [];
-  for (const s of dsl.scenes) {
-    if (!PRIMARY_CARD_TYPES.has(s.type)) continue;
-    times.push(s.startTime + s.duration * 0.6);
-    if (times.length >= max) break;
+interface Keyframe { sceneIndex: number; type: string; time: number; }
+
+/** Pick the moments worth looking at: mid-flight of each primary card, tagged
+ *  with the scene they belong to so a defect maps back to a fixable scene. */
+function keyframes(dsl: AnimationDSL, max = 4): Keyframe[] {
+  const out: Keyframe[] = [];
+  dsl.scenes.forEach((s, i) => {
+    if (out.length >= max || !PRIMARY_CARD_TYPES.has(s.type)) return;
+    out.push({ sceneIndex: i, type: s.type, time: s.startTime + s.duration * 0.6 });
+  });
+  return out;
+}
+
+/** Register the bundled fonts the renderer actually uses so the critic sees the
+ *  SAME frame that ships (not a Menlo-only fallback). Falls back to system mono. */
+async function registerFonts() {
+  const { GlobalFonts } = await import('@napi-rs/canvas');
+  const { existsSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const dir = join(process.cwd(), 'public', 'fonts');
+  const bundled: [string, string][] = [
+    ['JetBrainsMono.ttf', 'JetBrains Mono'],
+    ['Inter.ttf', 'Inter'],
+    ['SpaceGrotesk.ttf', 'Space Grotesk'],
+  ];
+  let anyMono = false;
+  for (const [file, family] of bundled) {
+    const p = join(dir, file);
+    if (existsSync(p)) { try { GlobalFonts.registerFromPath(p, family); if (family === 'JetBrains Mono') anyMono = true; } catch {} }
   }
-  return times;
+  if (!anyMono) for (const p of ['/System/Library/Fonts/Menlo.ttc', '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf']) {
+    if (existsSync(p)) { try { GlobalFonts.registerFromPath(p, 'JetBrains Mono'); break; } catch {} }
+  }
 }
 
 /** Render keyframes headlessly → JPEG data URLs (small: the critic doesn't need 1080p). */
-async function renderKeyframes(dsl: AnimationDSL, times: number[]): Promise<string[]> {
-  const { createCanvas, GlobalFonts } = await import('@napi-rs/canvas');
-  const { existsSync } = await import('node:fs');
-  for (const p of [
-    '/System/Library/Fonts/Menlo.ttc',
-    '/System/Library/Fonts/Monaco.ttf',
-    '/Library/Fonts/Courier New.ttf',
-    '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',
-  ]) {
-    if (existsSync(p)) {
-      try { GlobalFonts.registerFromPath(p, 'JetBrains Mono'); break; } catch {}
-    }
-  }
+async function renderKeyframes(dsl: AnimationDSL, kfs: Keyframe[]): Promise<string[]> {
+  const { createCanvas } = await import('@napi-rs/canvas');
+  await registerFonts();
   const { prepare, renderFrame } = await import('../renderer');
   const prep = await prepare(dsl);
   const scale = 640 / dsl.width;
   const canvas = createCanvas(640, Math.round(dsl.height * scale));
   const ctx = canvas.getContext('2d');
   const out: string[] = [];
-  for (const t of times) {
+  for (const kf of kfs) {
     ctx.save();
     ctx.scale(scale, scale);
-    renderFrame(ctx as unknown as CanvasRenderingContext2D, prep, t);
+    renderFrame(ctx as unknown as CanvasRenderingContext2D, prep, kf.time);
     ctx.restore();
     out.push(`data:image/jpeg;base64,${canvas.toBuffer('image/jpeg', 78).toString('base64')}`);
   }
@@ -68,7 +82,7 @@ async function renderKeyframes(dsl: AnimationDSL, times: number[]): Promise<stri
 }
 
 /** One multimodal round-trip (OpenAI-compatible content parts). */
-async function critiqueFrames(images: string[]): Promise<string[]> {
+async function critiqueFrames(images: string[], kfs: Keyframe[]): Promise<string[]> {
   const provider = process.env.GROQ_API_KEY ? 'groq' : process.env.OPENAI_API_KEY ? 'openai' : null;
   if (!provider) return [];
   const base = provider === 'groq' ? 'https://api.groq.com/openai/v1' : 'https://api.openai.com/v1';
@@ -104,8 +118,10 @@ async function critiqueFrames(images: string[]): Promise<string[]> {
     const parsed = JSON.parse(raw);
     const notes: string[] = [];
     for (const f of parsed?.frames ?? []) {
+      const kf = kfs[Number(f.index)];
+      const ref = kf ? `Scene ${kf.sceneIndex + 1} (${kf.type})` : `Keyframe ${Number(f.index) + 1}`;
       for (const issue of f?.issues ?? []) {
-        notes.push(`Keyframe ${Number(f.index) + 1}: ${String(issue)}`);
+        notes.push(`${ref}: ${String(issue)}`);
       }
     }
     return notes.slice(0, 10);
@@ -114,14 +130,15 @@ async function critiqueFrames(images: string[]): Promise<string[]> {
   }
 }
 
-/** Render → critique. Returns visual-defect notes ([] = clean or unavailable). */
+/** Render → critique. Returns visual-defect notes, each tagged with the scene it
+ *  refers to ([] = clean or unavailable). Notes are the closed-loop repair input. */
 export async function visionQA(dsl: AnimationDSL): Promise<string[]> {
   if (typeof window !== 'undefined') return [];
   try {
-    const times = keyframeTimes(dsl);
-    if (!times.length) return [];
-    const images = await renderKeyframes(dsl, times);
-    return await critiqueFrames(images);
+    const kfs = keyframes(dsl);
+    if (!kfs.length) return [];
+    const images = await renderKeyframes(dsl, kfs);
+    return await critiqueFrames(images, kfs);
   } catch {
     return [];
   }
