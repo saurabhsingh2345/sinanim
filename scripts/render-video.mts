@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
 import { AnimationDSL } from '../lib/types';
 import { normalizeDSL, repace, paceToNarration } from '../lib/dsl';
+import { toShorts } from '../lib/shorts';
 import { prepare, renderFrame } from '../lib/renderer';
 import { Conductor } from '../lib/conductor';
 import { SfxCollector, SfxEvent, SampleBuffers } from '../lib/sounds';
@@ -311,15 +312,16 @@ const SAMPLE = {
 };
 
 // ── CLI ─────────────────────────────────────────────────────────────────────────
-/** --shorts: vertical 1080x1920; --scenes a-b: teaser cut (repace re-times it). */
+/** --shorts: 9:16 teaser via toShorts (hook + payoff, vertical 1080x1920);
+ *  --scenes a-b: raw teaser cut (repace re-times it). */
 function applyFlags(raw: any, args: string[]): any {
-  const out = { ...raw };
-  if (args.includes('--shorts')) { out.width = 1080; out.height = 1920; }
+  let out = { ...raw };
   const si = args.indexOf('--scenes');
   if (si >= 0 && Array.isArray(out.scenes)) {
     const [a, b] = String(args[si + 1] || '').split('-').map((n) => parseInt(n, 10));
     if (isFinite(a)) out.scenes = out.scenes.slice(a, isFinite(b) ? b + 1 : a + 1);
   }
+  if (args.includes('--shorts')) out = toShorts(repace(normalizeDSL(out)));
   return out;
 }
 

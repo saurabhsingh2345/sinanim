@@ -715,6 +715,49 @@ export function Player({
     }
   }, [adsl.title, exporting, pause, seek]);
 
+  // 9:16 short: derive a vertical teaser (hook + payoff), re-synthesize its
+  // narration (subset of scenes → fresh, correctly-keyed buffers), and export it
+  // as its own MP4. Reuses the same audio engine (size-independent).
+  const doExportShort = useCallback(async () => {
+    const engine = engineRef.current;
+    if (!engine || exporting) return;
+    pause();
+    setExporting(true);
+    setProgress(0);
+    try {
+      const { toShorts } = await import('@/lib/shorts');
+      const short = toShorts(adsl, { maxSeconds: 45 });
+      let effective = short;
+      let buffers = new Map<number, AudioBuffer>();
+      let words = narrWordsRef.current;
+      if (voiceOn && hasNarration && narrEngineRef.current) {
+        const res = await buildNarration({ ...short, voice }, narrEngineRef.current, engine.context, (p) => setTts(p));
+        effective = res.dsl;
+        buffers = res.buffers;
+        words = res.words;
+      }
+      const prep = await prepare(effective);
+      prep.words = words;
+      const cv = document.createElement('canvas');
+      cv.width = effective.width;
+      cv.height = effective.height;
+      const wasMuted = engine.muted;
+      engine.muted = false;
+      const { blob, ext } = await exportVideo(cv, prep, engine, setProgress, buffers);
+      engine.muted = wasMuted;
+      const safe = adsl.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+      downloadBlob(blob, `${safe || 'lesson'}-short.${ext}`);
+      seek(0);
+    } catch (e) {
+      console.error(e);
+      alert('Short export failed: ' + (e instanceof Error ? e.message : 'unknown'));
+    } finally {
+      setExporting(false);
+      setProgress(0);
+      setTts({ phase: 'ready' });
+    }
+  }, [adsl, exporting, pause, seek, voice, voiceOn, hasNarration]);
+
   // Subtitle file (.srt) from the same word timeline as the burned-in captions.
   const doCaptionFile = useCallback(() => {
     const prep = prepRef.current;
@@ -887,6 +930,9 @@ export function Player({
             )}
             <button className="ib" onClick={doExport} aria-label="Export video">
               <Download size={16} />
+            </button>
+            <button className="ib txt" onClick={doExportShort} aria-label="Export 9:16 short">
+              9:16
             </button>
             {hasNarration && (
               <button className="ib txt" onClick={doCaptionFile} aria-label="Download subtitles (.srt)">
