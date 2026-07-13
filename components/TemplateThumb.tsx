@@ -21,7 +21,18 @@ async function renderThumb(id: string, build: () => unknown): Promise<string | n
   const hit = cache.get(id);
   if (hit) return hit;
   try {
-    await (document as any).fonts?.ready;
+    // Force the bundled families to load before rendering — document.fonts.ready
+    // alone can resolve before an unused @font-face has started loading, which
+    // makes the canvas thumb render in a fallback font (the "stale preview" bug).
+    const f: any = (document as any).fonts;
+    if (f?.load) {
+      await Promise.all([
+        f.load('700 24px "Space Grotesk"'),
+        f.load('500 16px "Inter"'),
+        f.load('500 16px "JetBrains Mono"'),
+      ].map((p) => p.catch(() => {})));
+    }
+    await f?.ready;
     const dsl: AnimationDSL = repace(normalizeDSL(build() as any));
     const prep = await prepare(dsl);
     // the flagship moment: the first full-frame scene, well into its steps
