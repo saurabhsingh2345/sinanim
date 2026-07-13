@@ -37,19 +37,19 @@ export function drawPageBlocks(ctx: CanvasRenderingContext2D, blocks: BrowserBlo
     const x = rect.x + padX;
     const blockTop = y;
     if (b.kind === 'nav') {
-      ctx.fillStyle = th.fg; ctx.font = `800 ${Math.round(unit * 1.05)}px ${MONO}`; ctx.textBaseline = 'middle';
+      ctx.fillStyle = th.fg; ctx.font = `800 ${Math.round(unit * 1.05)}px ${SANS}`; ctx.textBaseline = 'middle';
       ctx.fillText(b.brand, x, y + unit);
-      if (b.links) { ctx.font = `500 ${Math.round(unit * 0.62)}px ${MONO}`; ctx.fillStyle = th.dim; ctx.textAlign = 'right'; let lx = rect.x + rect.w - padX; for (let li = b.links.length - 1; li >= 0; li--) { ctx.fillText(b.links[li], lx, y + unit); lx -= ctx.measureText(b.links[li]).width + unit * 1.1; } ctx.textAlign = 'left'; }
+      if (b.links) { ctx.font = `500 ${Math.round(unit * 0.62)}px ${SANS}`; ctx.fillStyle = th.dim; ctx.textAlign = 'right'; let lx = rect.x + rect.w - padX; for (let li = b.links.length - 1; li >= 0; li--) { ctx.fillText(b.links[li], lx, y + unit); lx -= ctx.measureText(b.links[li]).width + unit * 1.1; } ctx.textAlign = 'left'; }
       y += unit * 2.2; ctx.fillStyle = th.border; ctx.fillRect(x, y - unit * 0.6, innerW, 1);
       hitRects.push({ x, y: blockTop, w: innerW, h: y - blockTop });
     } else if (b.kind === 'hero') {
-      ctx.fillStyle = th.fg; ctx.font = `800 ${Math.round(unit * 2)}px ${MONO}`; ctx.textBaseline = 'top';
+      ctx.fillStyle = th.fg; ctx.font = `800 ${Math.round(unit * 2)}px ${SANS}`; ctx.textBaseline = 'top';
       for (const ln of wrapText(ctx, b.heading, innerW)) { ctx.fillText(ln, x, y); y += unit * 2.3; }
-      if (b.sub) { ctx.fillStyle = th.dim; ctx.font = `400 ${Math.round(unit * 0.85)}px ${MONO}`; for (const ln of wrapText(ctx, b.sub, innerW)) { ctx.fillText(ln, x, y); y += unit * 1.3; } }
+      if (b.sub) { ctx.fillStyle = th.dim; ctx.font = `400 ${Math.round(unit * 0.85)}px ${SANS}`; for (const ln of wrapText(ctx, b.sub, innerW)) { ctx.fillText(ln, x, y); y += unit * 1.3; } }
       if (b.cta) {
         y += unit * 0.5; const bw = ctx.measureText(b.cta).width + unit * 2;
         ctx.fillStyle = th.accent; roundRect(ctx, x, y, bw, unit * 2, 8); ctx.fill();
-        ctx.fillStyle = '#fff'; ctx.font = `700 ${Math.round(unit * 0.8)}px ${MONO}`; ctx.textBaseline = 'middle'; ctx.fillText(b.cta, x + unit, y + unit);
+        ctx.fillStyle = '#fff'; ctx.font = `700 ${Math.round(unit * 0.8)}px ${SANS}`; ctx.textBaseline = 'middle'; ctx.fillText(b.cta, x + unit, y + unit);
         hitRects.push({ x, y, w: bw, h: unit * 2 });
         y += unit * 2.6;
       } else {
@@ -57,7 +57,7 @@ export function drawPageBlocks(ctx: CanvasRenderingContext2D, blocks: BrowserBlo
       }
       y += unit * 0.6;
     } else if (b.kind === 'button') {
-      const bw = (ctx.font = `700 ${Math.round(unit * 0.8)}px ${MONO}`, ctx.measureText(b.label).width + unit * 2);
+      const bw = (ctx.font = `700 ${Math.round(unit * 0.8)}px ${SANS}`, ctx.measureText(b.label).width + unit * 2);
       ctx.fillStyle = b.primary ? th.accent : th.card; roundRect(ctx, x, y, bw, unit * 2, 8); ctx.fill();
       if (!b.primary) { ctx.strokeStyle = th.border; ctx.lineWidth = 1.5; roundRect(ctx, x, y, bw, unit * 2, 8); ctx.stroke(); }
       ctx.fillStyle = b.primary ? '#fff' : th.fg; ctx.textBaseline = 'middle'; ctx.fillText(b.label, x + unit, y + unit);
@@ -67,25 +67,25 @@ export function drawPageBlocks(ctx: CanvasRenderingContext2D, blocks: BrowserBlo
       const bh = unit * (b.body ? 4.2 : 2.6);
       ctx.fillStyle = th.card; roundRect(ctx, x, y, innerW, bh, 10); ctx.fill();
       ctx.strokeStyle = th.border; ctx.lineWidth = 1.5; roundRect(ctx, x, y, innerW, bh, 10); ctx.stroke();
-      ctx.fillStyle = th.fg; ctx.font = `700 ${Math.round(unit * 0.95)}px ${MONO}`; ctx.textBaseline = 'top'; ctx.fillText(b.title, x + unit, y + unit * 0.8);
-      if (b.body) { ctx.fillStyle = th.dim; ctx.font = `400 ${Math.round(unit * 0.72)}px ${MONO}`; let yy = y + unit * 2.2; for (const ln of wrapText(ctx, b.body, innerW - unit * 2).slice(0, 2)) { ctx.fillText(ln, x + unit, yy); yy += unit * 1.2; } }
+      ctx.fillStyle = th.fg; ctx.font = `700 ${Math.round(unit * 0.95)}px ${SANS}`; ctx.textBaseline = 'top'; ctx.fillText(b.title, x + unit, y + unit * 0.8);
+      if (b.body) { ctx.fillStyle = th.dim; ctx.font = `400 ${Math.round(unit * 0.72)}px ${SANS}`; let yy = y + unit * 2.2; for (const ln of wrapText(ctx, b.body, innerW - unit * 2).slice(0, 2)) { ctx.fillText(ln, x + unit, yy); yy += unit * 1.2; } }
       hitRects.push({ x, y, w: innerW, h: bh });
       y += bh + unit * 0.9;
     } else if (b.kind === 'text') {
-      ctx.fillStyle = th.fg; ctx.font = `400 ${Math.round(unit * 0.82)}px ${MONO}`; ctx.textBaseline = 'top';
+      ctx.fillStyle = th.fg; ctx.font = `400 ${Math.round(unit * 0.82)}px ${SANS}`; ctx.textBaseline = 'top';
       const startY = y;
       for (const ln of wrapText(ctx, b.text, innerW)) { ctx.fillText(ln, x, y); y += unit * 1.3; } y += unit * 0.6;
       hitRects.push({ x, y: startY, w: innerW, h: y - startY });
     } else if (b.kind === 'input') {
       ctx.fillStyle = th.card; roundRect(ctx, x, y, innerW, unit * 2, 8); ctx.fill();
       ctx.strokeStyle = th.border; ctx.lineWidth = 1.5; roundRect(ctx, x, y, innerW, unit * 2, 8); ctx.stroke();
-      ctx.fillStyle = b.value ? th.fg : th.dim; ctx.font = `400 ${Math.round(unit * 0.78)}px ${MONO}`; ctx.textBaseline = 'middle'; ctx.fillText(b.value || b.placeholder, x + unit, y + unit);
+      ctx.fillStyle = b.value ? th.fg : th.dim; ctx.font = `400 ${Math.round(unit * 0.78)}px ${SANS}`; ctx.textBaseline = 'middle'; ctx.fillText(b.value || b.placeholder, x + unit, y + unit);
       hitRects.push({ x, y, w: innerW, h: unit * 2 });
       y += unit * 2.8;
     } else if (b.kind === 'image') {
       const bh = unit * 6; ctx.fillStyle = th.card; roundRect(ctx, x, y, innerW, bh, 10); ctx.fill();
       ctx.strokeStyle = th.border; ctx.lineWidth = 1.5; roundRect(ctx, x, y, innerW, bh, 10); ctx.stroke();
-      ctx.fillStyle = th.dim; ctx.font = `400 ${Math.round(unit * 0.75)}px ${MONO}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.label || 'image', rect.x + rect.w / 2, y + bh / 2); ctx.textAlign = 'left';
+      ctx.fillStyle = th.dim; ctx.font = `400 ${Math.round(unit * 0.75)}px ${SANS}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.label || 'image', rect.x + rect.w / 2, y + bh / 2); ctx.textAlign = 'left';
       hitRects.push({ x, y, w: innerW, h: bh });
       y += bh + unit * 0.9;
     } else if (b.kind === 'code') {
@@ -100,7 +100,7 @@ export function drawPageBlocks(ctx: CanvasRenderingContext2D, blocks: BrowserBlo
       const bh = unit * (lines.length * 1.2 + 1.4);
       ctx.fillStyle = th.card; roundRect(ctx, x, y, innerW, bh, 8); ctx.fill();
       ctx.strokeStyle = th.border; ctx.lineWidth = 1; roundRect(ctx, x, y, innerW, bh, 8); ctx.stroke();
-      ctx.fillStyle = th.fg; ctx.font = `400 ${Math.round(unit * 0.72)}px ${MONO}`; ctx.textBaseline = 'top';
+      ctx.fillStyle = th.fg; ctx.font = `400 ${Math.round(unit * 0.72)}px ${SANS}`; ctx.textBaseline = 'top';
       let yy = y + unit * 0.5;
       for (const ln of lines.slice(0, 8)) { ctx.fillText(ln, x + unit * 0.6, yy); yy += unit * 1.2; }
       hitRects.push({ x, y, w: innerW, h: bh });
@@ -109,26 +109,26 @@ export function drawPageBlocks(ctx: CanvasRenderingContext2D, blocks: BrowserBlo
       // Google-like centered search box
       const q = b.query || '';
       const reveal = Math.ceil(q.length * (last ? p : 1));
-      ctx.fillStyle = th.fg; ctx.font = `800 ${Math.round(unit * 1.8)}px ${MONO}`; ctx.textAlign = 'center';
+      ctx.fillStyle = th.fg; ctx.font = `800 ${Math.round(unit * 1.8)}px ${SANS}`; ctx.textAlign = 'center';
       ctx.fillText(b.engine || 'Search', rect.x + rect.w / 2, y + unit);
       ctx.textAlign = 'left';
       y += unit * 2.4;
       const barH = unit * 2.2;
       ctx.fillStyle = th.card; roundRect(ctx, x, y, innerW, barH, barH / 2); ctx.fill();
       ctx.strokeStyle = th.border; ctx.lineWidth = 1.5; roundRect(ctx, x, y, innerW, barH, barH / 2); ctx.stroke();
-      ctx.fillStyle = th.fg; ctx.font = `400 ${Math.round(unit * 0.85)}px ${MONO}`; ctx.textBaseline = 'middle';
+      ctx.fillStyle = th.fg; ctx.font = `400 ${Math.round(unit * 0.85)}px ${SANS}`; ctx.textBaseline = 'middle';
       ctx.fillText(q.slice(0, reveal), x + unit * 1.2, y + barH / 2);
       hitRects.push({ x, y, w: innerW, h: barH });
       y += barH + unit * 1.2;
     } else if (b.kind === 'serp') {
-      ctx.fillStyle = th.dim; ctx.font = `400 ${Math.round(unit * 0.65)}px ${MONO}`; ctx.textBaseline = 'top';
+      ctx.fillStyle = th.dim; ctx.font = `400 ${Math.round(unit * 0.65)}px ${SANS}`; ctx.textBaseline = 'top';
       ctx.fillText(`About ${b.results.length * 1240} results`, x, y); y += unit * 1.3;
       for (const r of b.results) {
-        ctx.fillStyle = th.dim; ctx.font = `400 ${Math.round(unit * 0.58)}px ${MONO}`;
+        ctx.fillStyle = th.dim; ctx.font = `400 ${Math.round(unit * 0.58)}px ${SANS}`;
         ctx.fillText(r.url, x, y); y += unit * 0.85;
-        ctx.fillStyle = '#8ab4f8'; ctx.font = `600 ${Math.round(unit * 0.95)}px ${MONO}`;
+        ctx.fillStyle = '#8ab4f8'; ctx.font = `600 ${Math.round(unit * 0.95)}px ${SANS}`;
         ctx.fillText(r.title, x, y); y += unit * 1.15;
-        ctx.fillStyle = th.fg; ctx.font = `400 ${Math.round(unit * 0.7)}px ${MONO}`;
+        ctx.fillStyle = th.fg; ctx.font = `400 ${Math.round(unit * 0.7)}px ${SANS}`;
         for (const ln of wrapText(ctx, r.snippet, innerW).slice(0, 2)) { ctx.fillText(ln, x, y); y += unit * 1.05; }
         y += unit * 0.55;
       }
@@ -137,25 +137,25 @@ export function drawPageBlocks(ctx: CanvasRenderingContext2D, blocks: BrowserBlo
       const sideW = Math.round(innerW * 0.28);
       const sideH = unit * 9;
       ctx.fillStyle = th.card; roundRect(ctx, x, y, sideW, sideH, 8); ctx.fill();
-      ctx.fillStyle = th.dim; ctx.font = `600 ${Math.round(unit * 0.6)}px ${MONO}`; ctx.textBaseline = 'top';
+      ctx.fillStyle = th.dim; ctx.font = `600 ${Math.round(unit * 0.6)}px ${SANS}`; ctx.textBaseline = 'top';
       let sy = y + unit * 0.6;
       ctx.fillText('Contents', x + unit * 0.5, sy); sy += unit * 1.1;
       for (const item of (b.sidebar || []).slice(0, 6)) {
         ctx.fillStyle = item === b.active ? th.accent : th.fg;
-        ctx.font = `${item === b.active ? '700' : '400'} ${Math.round(unit * 0.68)}px ${MONO}`;
+        ctx.font = `${item === b.active ? '700' : '400'} ${Math.round(unit * 0.68)}px ${SANS}`;
         ctx.fillText(item, x + unit * 0.5, sy); sy += unit * 1.15;
       }
       const cx = x + sideW + unit * 0.8;
       const cw = innerW - sideW - unit * 0.8;
-      ctx.fillStyle = th.fg; ctx.font = `800 ${Math.round(unit * 1.35)}px ${MONO}`;
+      ctx.fillStyle = th.fg; ctx.font = `800 ${Math.round(unit * 1.35)}px ${SANS}`;
       ctx.fillText(b.heading, cx, y + unit * 0.4);
       let cy = y + unit * 2.2;
-      ctx.fillStyle = th.fg; ctx.font = `400 ${Math.round(unit * 0.78)}px ${MONO}`;
+      ctx.fillStyle = th.fg; ctx.font = `400 ${Math.round(unit * 0.78)}px ${SANS}`;
       for (const ln of wrapText(ctx, b.body, cw).slice(0, 8)) { ctx.fillText(ln, cx, cy); cy += unit * 1.15; }
       if (b.highlight) {
         ctx.fillStyle = withAlpha(th.accent, 0.15);
         roundRect(ctx, cx - 4, cy + unit * 0.2, cw + 8, unit * 1.6, 6); ctx.fill();
-        ctx.fillStyle = th.accent; ctx.font = `600 ${Math.round(unit * 0.75)}px ${MONO}`;
+        ctx.fillStyle = th.accent; ctx.font = `600 ${Math.round(unit * 0.75)}px ${SANS}`;
         ctx.fillText(b.highlight, cx, cy + unit * 0.55);
       }
       hitRects.push({ x, y, w: innerW, h: sideH });
@@ -215,7 +215,7 @@ export function drawBrowserChrome(
   ctx.fillStyle = th.card; roundRect(ctx, barX, toolY + 10, barW, toolH - 20, 16); ctx.fill();
   ctx.fillStyle = th.dim; ctx.font = `400 ${Math.round(toolH * 0.28)}px ${SANS}`; ctx.textBaseline = 'middle';
   ctx.fillText('🔒', barX + 14, midY + 1);
-  ctx.fillStyle = th.fg; ctx.font = `400 ${Math.round(toolH * 0.3)}px ${MONO}`;
+  ctx.fillStyle = th.fg; ctx.font = `400 ${Math.round(toolH * 0.3)}px ${SANS}`;
   ctx.fillText(url.slice(0, Math.ceil(url.length * urlReveal)), barX + 40, midY + 1);
   // profile bubble
   ctx.beginPath(); ctx.fillStyle = th.accent; ctx.arc(win.x + win.w - 28, midY, 12, 0, Math.PI * 2); ctx.fill();
