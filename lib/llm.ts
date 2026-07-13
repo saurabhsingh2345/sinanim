@@ -211,6 +211,13 @@ keep the meaning, keep everything else in the JSON byte-identical (scenes, order
 ${SPOKEN_STYLE_RULES}
 Return ONLY the full JSON object.`;
 
+// Lean system prompt for text-only edit passes (narration rewrite, lint fix).
+// These passes transcribe/refine narration on an ALREADY-VALID lesson — they
+// never invent scene types or restructure — so they don't need the full 6k-token
+// scene vocabulary. Swapping it here cuts ~11k input tokens per lesson (and the
+// output guards reject any pass that breaks structure, so it stays safe).
+const LEAN_EDIT_SYSTEM = `You edit an existing narrated-coding-lesson JSON. Keep the EXACT schema, every scene's "type" and order, and every field you are not explicitly asked to change. Do the requested edit only. Return the COMPLETE corrected JSON object and nothing else — no prose, no markdown fences.`;
+
 /** Critic pass runs on hosted providers; local Ollama stays single-pass (speed).
  *  Set LLM_DEEP=0 to skip everywhere, LLM_DEEP=1 to force it on. */
 function criticEnabled(): boolean {
@@ -263,18 +270,25 @@ export async function generateDSL(
   let dsl = await draftDSL(prompt, opts, plan);
 
   if (criticEnabled()) {
-    try {
-      const improved = await chatJSON(
-        SYSTEM_PROMPT,
-        `${CRITIC_PROMPT}\n\nThe lesson request was: ${prompt}\n\nJSON to review:\n${JSON.stringify(dsl)}`,
-        opts,
-      );
-      const revision = normalizeDSL(JSON.parse(extractJSON(improved)));
-      // Refine-n-Judge: models prefer their own rewrites even when worse, so
-      // the revision must beat the draft on a fixed checklist to be accepted.
-      dsl = (await pickBetter(dsl, revision, opts)).dsl;
-    } catch {
-      // the draft is already valid — never let the editor pass break generation
+    // The critic rewrite + Refine-n-Judge is the single most expensive pass
+    // (~20k tokens: full-prompt rewrite + two judge calls). It's the biggest
+    // quality lever AND the biggest cost. Skip just this part with LLM_CRITIC=0
+    // for a "cheap but good" mode that keeps the plan, structural repairs,
+    // narration and lint (which are cheap and high-value).
+    if (process.env.LLM_CRITIC !== '0') {
+      try {
+        const improved = await chatJSON(
+          SYSTEM_PROMPT,
+          `${CRITIC_PROMPT}\n\nThe lesson request was: ${prompt}\n\nJSON to review:\n${JSON.stringify(dsl)}`,
+          opts,
+        );
+        const revision = normalizeDSL(JSON.parse(extractJSON(improved)));
+        // Refine-n-Judge: models prefer their own rewrites even when worse, so
+        // the revision must beat the draft on a fixed checklist to be accepted.
+        dsl = (await pickBetter(dsl, revision, opts)).dsl;
+      } catch {
+        // the draft is already valid — never let the editor pass break generation
+      }
     }
 
     // structural guarantees the prompts alone can't be trusted with.
@@ -366,7 +380,7 @@ export async function generateDSL(
     }
     try {
       const voiced = await chatJSON(
-        SYSTEM_PROMPT,
+        LEAN_EDIT_SYSTEM,
         `${NARRATION_PROMPT}\n\nJSON:\n${JSON.stringify(dsl)}`,
         opts,
       );
@@ -391,7 +405,7 @@ export async function generateDSL(
     if (issues.length) {
       try {
         const fixed = await chatJSON(
-          SYSTEM_PROMPT,
+          LEAN_EDIT_SYSTEM,
           `${LINT_FIX_PROMPT}\n\nLINT REPORT:\n${lintReport(issues)}\n\nJSON:\n${JSON.stringify(dsl)}`,
           opts,
         );

@@ -35,8 +35,10 @@ function cfg(p: Provider): ProviderCfg {
       return {
         base: 'https://api.openai.com/v1',
         key: process.env.OPENAI_API_KEY,
-        // strongest widely-available default for lesson quality; overridable
-        defaultModel: process.env.LLM_MODEL || 'gpt-4o',
+        // gpt-4o-mini is the cost-efficient default (~$0.15/$0.60 per M — on par
+        // with the Groq default, ~15x cheaper than gpt-4o) and writes solid
+        // lessons. Override with LLM_MODEL=gpt-4o for maximum quality.
+        defaultModel: process.env.LLM_MODEL || 'gpt-4o-mini',
         label: 'OpenAI',
       };
     case 'ollama':
