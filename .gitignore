@@ -37,4 +37,8 @@ next-env.d.ts
 
 # test artifacts
 scripts/frame-*.png
+scripts/out/
 scripts/narration-test.wav
+
+# captured browser screenshots
+.cache/

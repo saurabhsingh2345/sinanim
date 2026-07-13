@@ -1,5 +1,6 @@
 import { AnimationDSL, PRIMARY_CARD_TYPES } from './types';
 import { lintScript } from './script-lint';
+import { spokenNarration } from './step-sync';
 
 /** ~2.6 words/second is a comfortable tutorial speaking rate (Kokoro default). */
 const WORDS_PER_SECOND = 2.6;
@@ -33,6 +34,16 @@ export function runVisualQA(dsl: AnimationDSL, topicHint?: string): string[] {
     notes.push('No quiz — add a checkpoint after the key concept.');
   }
 
+  // Terminal soup: terminals show output only (no code), so a lesson built from
+  // them explains nothing. Coding lessons must teach in an "ide" scene.
+  const terminals = dsl.scenes.filter((s) => s.type === 'terminal').length;
+  const ides = dsl.scenes.filter((s) => s.type === 'ide').length;
+  if (terminals >= 2 || (terminals >= 1 && ides === 0 && !dsl.scenes.some((s) => s.type === 'code'))) {
+    notes.push(
+      `${terminals} bare "terminal" scene(s) but no code walkthrough — a terminal shows output, not code, so it can't teach. Move the code into an "ide" scene (type → explain → run) and keep at most one terminal.`,
+    );
+  }
+
   if (
     /\b(python|javascript|typescript|loop|function|algorithm|coding)\b/.test(topic) &&
     !dsl.scenes.some((s) => s.type === 'challenge')
@@ -54,7 +65,7 @@ export function runVisualQA(dsl: AnimationDSL, topicHint?: string): string[] {
   for (let i = 0; i < dsl.scenes.length; i++) {
     const s = dsl.scenes[i];
     const label = `Scene ${i + 1} (${s.type})`;
-    const words = (s.narration || '').trim().split(/\s+/).filter(Boolean).length;
+    const words = spokenNarration(s).trim().split(/\s+/).filter(Boolean).length;
 
     if (PRIMARY_CARD_TYPES.has(s.type) && words < 16) {
       notes.push(`${label}: narration is short — aim for 2+ spoken sentences (~30 words).`);
@@ -98,7 +109,7 @@ export function runVisualQA(dsl: AnimationDSL, topicHint?: string): string[] {
   // ── Pacing audit: voice and visuals must carry comparable weight ──
   for (let i = 0; i < dsl.scenes.length; i++) {
     const s = dsl.scenes[i];
-    const words = (s.narration || '').trim().split(/\s+/).filter(Boolean).length;
+    const words = spokenNarration(s).trim().split(/\s+/).filter(Boolean).length;
     const speech = words / WORDS_PER_SECOND;
     // lots of on-screen content but almost no voice = the "silent typing" feel
     const contentChars =
@@ -147,7 +158,7 @@ export function runVisualQA(dsl: AnimationDSL, topicHint?: string): string[] {
     }
   }
   const totalWords = dsl.scenes.reduce(
-    (a, s) => a + (s.narration || '').split(/\s+/).filter(Boolean).length, 0,
+    (a, s) => a + spokenNarration(s).split(/\s+/).filter(Boolean).length, 0,
   );
   if (totalWords / WORDS_PER_SECOND > 6.5 * 60) {
     notes.push('Lesson runs past ~6 minutes of speech — engagement drops hard after 6; split into two lessons.');

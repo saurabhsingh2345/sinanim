@@ -9,6 +9,7 @@ import {
   buildCaptionPages,
   estimatedCaptionPages,
 } from './word-timeline';
+import { spokenNarration } from './step-sync';
 
 export interface CaptionCue {
   /** Absolute video time (s). */
@@ -24,13 +25,14 @@ export function buildCaptionCues(
 ): CaptionCue[] {
   const cues: CaptionCue[] = [];
   dsl.scenes.forEach((s, i) => {
-    if (!s.narration) return;
+    const spoken = spokenNarration(s);
+    if (!spoken) return;
     const speech = Math.min(s.narrationDuration ?? s.duration, s.duration);
     const timed = words?.get(i);
     const pages =
       timed && timed.length
         ? buildCaptionPages(timed)
-        : estimatedCaptionPages(s.narration, speech);
+        : estimatedCaptionPages(spoken, speech);
     for (const p of pages) {
       cues.push({
         start: s.startTime + p.start,

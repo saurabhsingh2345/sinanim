@@ -11,7 +11,7 @@ import { AnimationDSL } from './types';
 import { paceToNarration } from './dsl';
 import { DEFAULT_VOICE, NarrationEngine, SynthesizedClip, TTSPhase } from './tts';
 import { WordTiming, buildWordTimeline, SentenceClipInfo } from './word-timeline';
-import { splitSentences, hasStepNarration, stepStartsFromSentences } from './step-sync';
+import { splitSentences, hasStepNarration, stepStartsFromSentences, spokenNarration } from './step-sync';
 import { prosodyPlan } from './prosody';
 
 export { splitSentences };
@@ -56,7 +56,7 @@ export async function buildNarration(
 ): Promise<NarrationResult> {
   const voice = dsl.voice || DEFAULT_VOICE;
   const narrated = dsl.scenes
-    .map((s, i) => ({ i, sentences: s.narration ? splitSentences(s.narration) : [] }))
+    .map((s, i) => ({ i, sentences: splitSentences(spokenNarration(s)) }))
     .filter((x) => x.sentences.length > 0);
 
   const buffers = new Map<number, AudioBuffer>();

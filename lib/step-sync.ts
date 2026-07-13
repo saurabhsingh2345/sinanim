@@ -13,6 +13,8 @@
 // This module is import-cycle-free on purpose: dsl.ts (normalize) and
 // narration.ts / render-video.mts (sync attach) both depend on it.
 
+import type { Scene } from './types';
+
 export const MAX_SENTENCE = 300;
 
 /** Split narration into speakable sentences; long ones split again at commas. */
@@ -62,6 +64,24 @@ export function composeStepNarration(
 }
 
 /**
+ * The full spoken text of a scene, derived ON READ.
+ *
+ * For an ide scene the teaching lives in the per-step narrations; the scene's
+ * own `narration` is only the short intro. We compose them here at the moment
+ * of consumption (TTS, captions, word counts, lint) rather than baking the
+ * composition back into `scene.narration` — because that field round-trips
+ * through the LLM critic/narration/lint passes, and a composed value fed back
+ * in gets re-composed every pass, stacking the whole script 2-4× (the "why is
+ * it saying everything four times" bug). Deriving on read is idempotent.
+ */
+export function spokenNarration(scene: Scene): string {
+  if (scene.type === 'ide' && Array.isArray(scene.steps) && hasStepNarration(scene.steps)) {
+    return composeStepNarration(scene.narration, scene.steps);
+  }
+  return scene.narration || '';
+}
+
+/**
  * Map steps to start times (seconds inside the scene's stitched narration
  * clip). `sentenceOffsets[k]` is the exact start of sentence k. The intro's
  * sentence count is derived arithmetically: total sentences minus the steps'
@@ -77,12 +97,20 @@ export function stepStartsFromSentences(
     st.narration && st.narration.trim() ? splitSentences(ensureSentenceEnd(st.narration)).length : 0,
   );
   const stepTotal = counts.reduce((a, n) => a + n, 0);
+  const lastIdx = Math.max(sentenceOffsets.length - 1, 0);
+  // Normally intro + steps re-split to exactly `totalSentences` and each step
+  // maps to its own sentence offset. If the counts OVERSHOOT (re-split drift),
+  // don't let every late step collapse onto the final sentence — spread the
+  // narrated steps proportionally across the real sentences instead.
+  const overflow = stepTotal > totalSentences && stepTotal > 0;
   let cursor = Math.max(0, totalSentences - stepTotal); // intro sentences come first
+  let cumBefore = 0;
   const raw: (number | null)[] = counts.map((n) => {
-    if (!n) return null;
-    const at = sentenceOffsets[Math.min(cursor, Math.max(sentenceOffsets.length - 1, 0))] ?? null;
+    if (!n) { return null; }
+    const idx = overflow ? Math.round((cumBefore / stepTotal) * totalSentences) : cursor;
     cursor += n;
-    return at;
+    cumBefore += n;
+    return sentenceOffsets[Math.min(Math.max(idx, 0), lastIdx)] ?? null;
   });
   const out: number[] = [];
   for (let i = 0; i < raw.length; i++) {

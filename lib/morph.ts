@@ -18,7 +18,12 @@ export type MorphKind = 'kept' | 'add' | 'remove';
 
 export interface MorphToken {
   text: string;
+  /** Destination color (AFTER grid). */
   color: string;
+  /** Source color (BEFORE grid) — differs from `color` when a token is recolored
+   *  by the edit (e.g. an identifier becomes a keyword). The renderer blends
+   *  from→to across the slide for a Magic-Move-style color morph. */
+  fromColor: string;
   kind: MorphKind;
   /** Position in the BEFORE grid (kept/remove). */
   fromRow: number;
@@ -215,6 +220,7 @@ export function buildMorph(
       tokens.push({
         text: aUnits[y].text,
         color: aUnits[y].color,
+        fromColor: bUnits[x].color, // recolored tokens morph their color across the slide
         kind: 'kept',
         fromRow: bUnits[x].row,
         fromCol: bUnits[x].col,
@@ -224,11 +230,11 @@ export function buildMorph(
     }
     bUnits.forEach((u, x) => {
       if (bMatched.has(x)) return;
-      tokens.push({ text: u.text, color: u.color, kind: 'remove', fromRow: u.row, fromCol: u.col, toRow: 0, toCol: 0 });
+      tokens.push({ text: u.text, color: u.color, fromColor: u.color, kind: 'remove', fromRow: u.row, fromCol: u.col, toRow: 0, toCol: 0 });
     });
     aUnits.forEach((u, y) => {
       if (aMatched.has(y)) return;
-      tokens.push({ text: u.text, color: u.color, kind: 'add', fromRow: 0, fromCol: 0, toRow: u.row, toCol: u.col });
+      tokens.push({ text: u.text, color: u.color, fromColor: u.color, kind: 'add', fromRow: 0, fromCol: 0, toRow: u.row, toCol: u.col });
     });
     block = null;
   };
@@ -240,6 +246,7 @@ export function buildMorph(
         tokens.push({
           text: u.text,
           color: u.color,
+          fromColor: u.color,
           kind: 'kept',
           fromRow: bi,
           fromCol: u.col,

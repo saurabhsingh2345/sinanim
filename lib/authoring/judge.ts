@@ -9,6 +9,7 @@
 
 import { AnimationDSL } from '../types';
 import { chatJSON, GenerateOptions } from '../llm-core';
+import { spokenNarration } from '../step-sync';
 
 export interface JudgeVerdict {
   /** Checklist item -> pass/fail. */
@@ -45,7 +46,7 @@ function judgeView(dsl: AnimationDSL): string {
     title: dsl.title,
     scenes: dsl.scenes.map((s) => ({
       type: s.type,
-      narration: s.narration,
+      narration: spokenNarration(s),
       ...(s.type === 'quiz' ? { question: s.question, options: s.options } : {}),
       ...(s.type === 'challenge' ? { prompt: s.prompt } : {}),
       ...(s.type === 'ide'

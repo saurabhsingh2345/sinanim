@@ -13,6 +13,9 @@ import { revealedCount } from './timing';
  * whichever scene's speech window contains `time`.
  * `reset()` on every seek so nothing double-fires.
  */
+/** Card scene types that get a soft reveal swish (chapter/title use whoosh). */
+const CARD_SWISH = new Set(['bullets', 'quote', 'bigstat', 'diagram', 'quiz', 'challenge', 'viz']);
+
 export class Conductor {
   private last = -1;
   private firedClicks = new Set<number>();
@@ -54,6 +57,13 @@ export class Conductor {
 
     let typedChar: string | undefined;
     prep.dsl.scenes.forEach((s, i) => {
+      // Every full-frame card gets a soft reveal swish as it lands (chapter/title
+      // use the deeper whoosh below). Independent of the type chain that follows.
+      if (CARD_SWISH.has(s.type)) {
+        this.cue(`swish:${i}`, time >= s.startTime && prev < s.startTime && s.startTime > 0.2, () =>
+          this.engine.swish(0.3),
+        );
+      }
       if (s.type === 'click') {
         if (time >= s.startTime && prev < s.startTime && !this.firedClicks.has(i)) {
           this.firedClicks.add(i);
@@ -136,6 +146,41 @@ export class Conductor {
           const tabAt = s.startTime + 0.35;
           this.cue(`browser-tab:${i}`, time >= tabAt && prev < tabAt, () => this.engine.click());
         }
+      } else if (s.type === 'bigstat') {
+        // count-up ticks over the ~1.4s roll, then a soft ting when it settles
+        const rollEnd = Math.min(1.4, s.duration * 0.6);
+        for (let k = 0; k < 7; k++) {
+          const at = s.startTime + 0.25 + (rollEnd / 7) * k;
+          this.cue(`stat:${i}:${k}`, time >= at && prev < at, () => this.engine.tick(1.1 + k * 0.03));
+        }
+        const done = s.startTime + 0.25 + rollEnd;
+        this.cue(`stat-done:${i}`, time >= done && prev < done, () => this.engine.ting());
+      } else if (s.type === 'highlight') {
+        this.cue(`hl:${i}`, time >= s.startTime && prev < s.startTime, () => this.engine.pop(0.16, 1.3));
+      } else if (s.type === 'mascot') {
+        const act = (s as any).action as string;
+        this.cue(`mascot:${i}`, time >= s.startTime && prev < s.startTime, () => {
+          if (act === 'celebrate') this.engine.success();
+          else if (act === 'shocked') this.engine.buzz();
+          else this.engine.pop(0.3, 1.05);
+        });
+      } else if (s.type === 'api') {
+        const sendAt = s.startTime + Math.min(1.1, s.duration * 0.35);
+        this.cue(`api-send:${i}`, time >= sendAt && prev < sendAt, () => this.engine.send());
+        const recvAt = s.startTime + Math.min(2.2, s.duration * 0.6);
+        this.cue(`api-recv:${i}`, time >= recvAt && prev < recvAt, () => this.engine.ting());
+      } else if (s.type === 'pr') {
+        // a light tick per revealed diff row, spread across the first ~60%
+        const rows = ((s as any).lines?.length ?? (s as any).hunks?.length ?? 8) as number;
+        const win = s.duration * 0.6;
+        for (let r = 0; r < Math.min(rows, 24); r++) {
+          const at = s.startTime + 0.3 + (win / Math.max(rows, 1)) * r;
+          this.cue(`pr:${i}:${r}`, time >= at && prev < at, () => this.engine.tick(0.98 + (r % 3) * 0.05));
+        }
+      } else if (s.type === 'challenge') {
+        // the "solved / solution" beat lands in the back third
+        const at = s.startTime + s.duration * 0.72;
+        this.cue(`chal:${i}`, time >= at && prev < at, () => this.engine.success());
       }
     });
 

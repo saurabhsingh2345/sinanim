@@ -217,6 +217,26 @@ export function revealTokenLines(tokens: Tok[][], n: number): Tok[][] {
   return out.length ? out : [[]];
 }
 
+/** Reveal each line up to `perLine[i]` characters (MAX_SAFE_INTEGER = whole line,
+ *  0 = hidden). Used by the IDE line-aware typing reveal so static lines stay put
+ *  and only the currently-typed line is partial. */
+export function revealTokenLinesByLine(tokens: Tok[][], perLine: number[]): Tok[][] {
+  return tokens.map((line, li) => {
+    const limit = perLine[li] ?? Number.MAX_SAFE_INTEGER;
+    if (limit >= Number.MAX_SAFE_INTEGER) return line;
+    if (limit <= 0) return [];
+    const out: Tok[] = [];
+    let count = 0;
+    for (const t of line) {
+      const remaining = limit - count;
+      if (remaining <= 0) break;
+      out.push(remaining >= t.text.length ? t : { text: t.text.slice(0, remaining), color: t.color });
+      count += t.text.length;
+    }
+    return out;
+  });
+}
+
 export function drawMouseCursor(ctx: CanvasRenderingContext2D, x: number, y: number, alpha: number) {
   if (alpha <= 0.01) return;
   ctx.save();

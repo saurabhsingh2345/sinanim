@@ -222,7 +222,21 @@ export function drawBrowserChrome(
   return { pageTop: toolY + toolH + 1, urlBar };
 }
 
-export function drawBrowserCard(ctx: CanvasRenderingContext2D, scene: BrowserScene, time: number, W: number, H: number) {
+/** Cover-fit an image into a rect (crop overflow, center), clipped to the rect. */
+function drawCoverImage(ctx: CanvasRenderingContext2D, img: CanvasImageSource, r: Rect) {
+  const iw = (img as any).naturalWidth || (img as any).width || r.w;
+  const ih = (img as any).naturalHeight || (img as any).height || r.h;
+  const scale = Math.max(r.w / iw, r.h / ih);
+  const dw = iw * scale, dh = ih * scale;
+  const dx = r.x + (r.w - dw) / 2, dy = r.y; // top-align (show page from the top)
+  ctx.save();
+  ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); ctx.clip();
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.drawImage(img, dx, dy, dw, dh);
+  ctx.restore();
+}
+
+export function drawBrowserCard(ctx: CanvasRenderingContext2D, scene: BrowserScene, time: number, W: number, H: number, shot?: CanvasImageSource | null) {
   const a = cardAlpha(scene, time); if (a <= 0) return;
   const local = time - scene.startTime;
   const th = pageThemeFrom(scene);
@@ -239,9 +253,15 @@ export function drawBrowserCard(ctx: CanvasRenderingContext2D, scene: BrowserSce
   const frac = clamp(((local - start) / per) - (shown - 1), 0, 1);
   const pageRect: Rect = { x: win.x, y: pageTop, w: win.w, h: win.y + win.h - pageTop };
   const unit = Math.round(H / 44);
-  const hits = drawPageBlocks(ctx, scene.blocks, pageRect, shown, frac, th, unit);
+  // Real captured page screenshot, or the mock-block fallback.
+  let hits: Rect[] = [];
+  if (shot) {
+    drawCoverImage(ctx, shot, pageRect);
+  } else {
+    hits = drawPageBlocks(ctx, scene.blocks, pageRect, shown, frac, th, unit);
+  }
   // cursor click on the real block rect
-  if (scene.clickBlock != null && local > window * 0.78) {
+  if (scene.clickBlock != null && !shot && local > window * 0.78) {
     const hit = hits[scene.clickBlock] || hits[hits.length - 1];
     const cxp = hit ? hit.x + hit.w / 2 : win.x + win.w * 0.5;
     const cyp = hit ? hit.y + hit.h / 2 : win.y + win.h * 0.6;
@@ -263,15 +283,15 @@ export function browserFocus(scene: BrowserScene, time: number, W: number, H: nu
   const win: Rect = { x: M, y: Math.round(H * 0.055), w: W - 2 * M, h: H - Math.round(H * 0.14) };
   const hasOmniboxType = scene.blocks.some((b) => b.kind === 'search') || local < 0.9;
   if (hasOmniboxType && local < Math.min(1.4, window * 0.25)) {
-    return { x: win.x + win.w * 0.45, y: win.y + 40 + 44 + 26, zoom: 1.2, strength: 0.9 };
+    return { x: win.x + win.w * 0.45, y: win.y + 40 + 44 + 26, zoom: 1.1, strength: 0.8 };
   }
   if (scene.clickBlock != null && local > window * 0.72) {
     // Aim toward mid-page CTA / SERP row (hit-test refined in drawBrowserCard)
     const yBias = scene.blocks[scene.clickBlock]?.kind === 'serp' ? 0.42 : 0.55;
-    return { x: win.x + win.w * 0.4, y: win.y + win.h * yBias, zoom: 1.22, strength: 0.92 };
+    return { x: win.x + win.w * 0.4, y: win.y + win.h * yBias, zoom: 1.12, strength: 0.82 };
   }
   if (scene.blocks.some((b) => b.kind === 'docs' || b.kind === 'serp')) {
-    return { x: win.x + win.w * 0.48, y: win.y + win.h * 0.48, zoom: 1.08, strength: 0.55 };
+    return { x: win.x + win.w * 0.48, y: win.y + win.h * 0.48, zoom: 1.06, strength: 0.5 };
   }
-  return { x: W / 2, y: H / 2, zoom: 1.04, strength: 0.35 };
+  return { x: W / 2, y: H / 2, zoom: 1.03, strength: 0.32 };
 }

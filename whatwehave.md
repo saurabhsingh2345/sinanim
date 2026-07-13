@@ -117,6 +117,36 @@ Re-recording a take becomes "edit one sentence and re-render." The same `renderF
 
 ---
 
+## 5b. Craft Overhaul (2026-07-12) — "Waking the Beast, For Real"
+
+A top-to-bottom quality pass on motion, sound, and template polish. All effects
+are `f(t, seed)` and byte-deterministic (verified by `scripts/render-showcase.mts`,
+which re-renders each frame and asserts identical PNG hashes across all 14 scaffolds).
+
+- **New OSS deps** (permissive): `gsap`, `popmotion`, `d3-ease`, `jsfxr`,
+  `simplex-noise`, `@dagrejs/dagre`, `ghost-cursor`. (magic-move skipped — it needs
+  shiki v4; morph.ts already implements the same token-FLIP, so it was enhanced instead.)
+- **Motion toolkit** (`lib/motion.ts`): springs (`springValue`), `cubicBezier`,
+  back/elastic/bounce eases, `envelopeBack`, nonlinear `staggerCurve`. Deterministic
+  RNG + simplex noise + screen-shake in `lib/seedrng.ts`. GSAP seek helper `lib/gsap-seek.ts`.
+- **Camera** (`lib/camera.ts`): opt-in cinematic breathing on poster cards (off for
+  code), overshoot push-ins, seeded error screen-shake (mascot `shocked`, terminal errors),
+  Run-button spring press + double-ring ripple.
+- **Transitions** (`lib/transitions.ts`): themed reveals (dissolve/wipe/iris/bars/sweep),
+  per-scene defaults, physical slide/push, per-chapter backdrop mood shift, `blendPrevFrame`
+  cross-dissolve API. Replaces the old black-overlay stubs.
+- **Sound** (`lib/sounds.ts`, `lib/conductor.ts`, `lib/audio-mix.ts`,
+  `scripts/generate-sounds.mts`): 8 new synthesized SFX (swish/tick/hover/send/ting/success/
+  back) + an 18s ambient **music bed with narration ducking** (`dsl.music`); full
+  scene-type coverage (api send/receive, pr line ticks, mascot/challenge stings, card
+  swishes); humanized keystrokes + narration crossfades. All CC0 (synthesized).
+- **Morph** (`lib/morph.ts`): per-token **color morph** (`fromColor`) + spring landing.
+- **Diagram** (`lib/render/diagram-layout.ts`): **dagre auto-layout** (LLM can omit
+  x/y via `layout:'auto'`), curved bezier edges, styled arrowheads, ByteByteGo **flow pulses**.
+- **Particles** (`lib/particles.ts`): seekable confetti burst (challenge pass / quiz) + spark burst.
+- **Bug fixed:** latent `ctx.save` stack leak in `layout` (drawBrowserChrome →
+  drawWindowFrame "caller-restores" contract) that made it nondeterministic.
+
 ## 6. Quick Reference
 
 | Thing | Where |

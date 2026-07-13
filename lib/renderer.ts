@@ -29,10 +29,15 @@ import {
 import { tokenizeCode, Tok } from './highlight';
 import { inferLang } from './dsl';
 import { TEMPLATES, SpriteState } from './templates';
-import { clamp, easeInOut, easeOutCubic, lerp } from './utils';
+import { clamp, easeInOut, easeOutCubic, lerp, mixHex } from './utils';
 import { typeSchedule, revealedCount } from './timing';
+import { spokenNarration } from './step-sync';
 import { FocusTarget, applyCamera, cameraAt } from './camera';
-import { easeOutExpo, envelope, springOut, staggerProgress } from './motion';
+import { easeOutBack, easeOutExpo, envelope, envelopeBack, springOut, staggerProgress } from './motion';
+import { shakeAt, type ShakeOffset } from './seedrng';
+import { drawReveal, defaultTransition, slideEntryOffset } from './transitions';
+import { diagramLayout, wantsAutoLayout } from './render/diagram-layout';
+import { drawConfettiBurst } from './particles';
 import { MorphPlan, addRowAt, buildMorph, paceMorphToNarration } from './morph';
 import { MascotAction, drawMascot } from './mascot';
 import { resolveTheme, ThemePack } from './themes';
@@ -85,6 +90,30 @@ export interface Prepared {
   captionPages?: Map<number, CaptionPage[]>;
   /** browserrec sceneIndex -> its <video> (browser only; Node draws a slate). */
   videos?: Map<number, HTMLVideoElement>;
+  /** browser sceneIndex -> a decoded REAL page screenshot (loaded from scene.shot,
+   *  works in both Node via @napi-rs/canvas and the browser via Image). */
+  pageShots?: Map<number, CanvasImageSource>;
+}
+
+/** Load a captured page screenshot in whichever runtime we're in. Node uses
+ *  @napi-rs/canvas (no DOM needed); the browser uses an <img>. */
+async function loadShotImage(src: string): Promise<CanvasImageSource | null> {
+  try {
+    if (typeof window !== 'undefined') {
+      return await new Promise<CanvasImageSource | null>((res) => {
+        const im = new Image();
+        im.onload = () => res(im);
+        im.onerror = () => res(null);
+        im.src = src;
+      });
+    }
+    // Node-only path; the magic comment stops webpack from bundling this native
+    // module into the browser build (it pulls in `fs`, which breaks the client).
+    const mod: any = await import(/* webpackIgnore: true */ '@napi-rs/canvas');
+    return (await mod.loadImage(src)) as CanvasImageSource;
+  } catch {
+    return null;
+  }
 }
 
 /** Live UI state the interactive player feeds in (never set during export). */
@@ -109,6 +138,7 @@ export async function prepare(dsl: AnimationDSL): Promise<Prepared> {
   const typedText = new Map<number, string>();
   const ideTokens = new Map<number, Map<string, Tok[][]>>();
   const videos = new Map<number, HTMLVideoElement>();
+  const pageShots = new Map<number, CanvasImageSource>();
   await Promise.all(
     dsl.scenes.map(async (s, i) => {
       // Narration-paced content window: code should land WITH the voice, not
@@ -190,10 +220,14 @@ export async function prepare(dsl: AnimationDSL): Promise<Prepared> {
           new Promise<void>((res) => setTimeout(res, 5000)),
         ]);
         if (video.readyState >= 2) videos.set(i, video);
+      } else if (s.type === 'browser' && s.shot) {
+        // Real captured screenshot of the live URL — composited over mock blocks.
+        const img = await loadShotImage(s.shot);
+        if (img) pageShots.set(i, img);
       }
     }),
   );
-  return { dsl, morphs, schedule, typedText, ideTokens, videos };
+  return { dsl, morphs, schedule, typedText, ideTokens, videos, pageShots };
 }
 
 /**
@@ -357,6 +391,9 @@ export function renderFrame(ctx: CanvasRenderingContext2D, prep: Prepared, time:
   const targets: FocusTarget[] = [];
   const panels = layoutPanels(prep, time);
   const codeSlot = panels.find((p) => p.kind === 'code' || p.kind === 'diff') || null;
+  // Breath keeps card frames alive; it stays OFF for anything with pixel-critical
+  // monospace to read (code/ide/terminal/browser), so glyphs never shimmer.
+  let breath = 0;
 
   if (card && card.type === 'ide') {
     // Screen-Studio-style: glide + zoom toward the region each step acts on.
@@ -369,12 +406,15 @@ export function renderFrame(ctx: CanvasRenderingContext2D, prep: Prepared, time:
     const f = layoutFocus(card as LayoutScene, W, H);
     if (f) targets.push(f);
   } else if (card) {
-    const p = clamp((time - card.startTime) / Math.max(card.duration, 0.01), 0, 1);
+    // full-frame card scene (title/chapter/bullets/quote/…): gentle push-in with a
+    // touch of overshoot, over a cinema-slider breathing base. Poster cards get a
+    // felt push (1.05); code/chrome cards stay nearly locked (1.02) so text is crisp.
+    breath = breathFor(card.type);
     targets.push({
       x: W / 2,
       y: H / 2,
-      zoom: lerp(1.015, 1.06, p), // slow push-in across the card
-      strength: envelope(time, card.startTime, card.startTime + card.duration, 0.5, 0.45),
+      zoom: breath > 0 ? 1.05 : 1.02,
+      strength: envelopeBack(time, card.startTime, card.startTime + card.duration, 0.9, 0.7, 1.3),
     });
   } else {
     // dive toward the region of code that is changing right now
@@ -388,15 +428,32 @@ export function renderFrame(ctx: CanvasRenderingContext2D, prep: Prepared, time:
       targets.push({
         x: clamp(r.x + r.w / 2, W * 0.3, W * 0.7),
         y: r.y + r.h / 2,
-        zoom: 1.17,
-        strength: envelope(time, hl.start, hl.end, 0.75, 0.6) * 0.92,
+        zoom: 1.1,
+        strength: envelope(time, hl.start, hl.end, 1.0, 0.8) * 0.9,
       });
     }
   }
-  const cam = cameraAt(time, W, H, targets);
+  const jolt = errorShake(prep, time);
+  const cam = cameraAt(time, W, H, targets, {
+    breath,
+    shakeX: jolt.dx,
+    shakeY: jolt.dy,
+    shakeRot: jolt.rot,
+  });
 
   ctx.save();
   applyCamera(ctx, cam, W, H);
+  // physical slide/push: the incoming world glides into place during its entry.
+  const slideKind = card && card.startTime >= 0.05
+    ? ((('transition' in card ? card.transition : undefined) as string) || defaultTransition(card.type))
+    : undefined;
+  if (card && (slideKind === 'slide' || slideKind === 'push')) {
+    const local = time - card.startTime;
+    if (local >= 0 && local < 0.55) {
+      const off = slideEntryOffset(clamp(local / 0.47, 0, 1), W, H, slideKind === 'push' ? 'right' : 'left');
+      ctx.translate(off.dx, off.dy);
+    }
+  }
   drawWorld(ctx, prep, time, panels, card, ui);
   drawCardTransition(ctx, card, time, W, H);
   ctx.restore();
@@ -406,6 +463,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, prep: Prepared, time:
   if (text && !card) drawCaption(ctx, text, time, W, H);
   drawNarrationCaption(ctx, prep, time);
   drawDips(ctx, dsl, time, W, H);
+  drawCelebrations(ctx, prep, time, W, H);
 
   const vig = ctx.createRadialGradient(W / 2, H / 2, H * 0.48, W / 2, H / 2, H * 0.98);
   vig.addColorStop(0, 'rgba(0,0,0,0)');
@@ -414,41 +472,148 @@ export function renderFrame(ctx: CanvasRenderingContext2D, prep: Prepared, time:
   ctx.fillRect(0, 0, W, H);
 }
 
+/**
+ * Confetti on the win beats — a challenge's "solved" moment and a quiz's answer
+ * reveal. Drawn in the fixed (non-camera) layer so it rains over the whole frame.
+ * Fully deterministic (seeded), so seeking lands on the exact same confetti.
+ */
+function drawCelebrations(ctx: CanvasRenderingContext2D, prep: Prepared, time: number, W: number, H: number) {
+  const scenes = prep.dsl.scenes;
+  for (let i = 0; i < scenes.length; i++) {
+    const s = scenes[i];
+    if (s.type === 'challenge') {
+      const at = s.startTime + s.duration * 0.72;
+      drawConfettiBurst(ctx, W / 2, H * 0.34, time - at, 4200 + i * 17, 110, 2.4);
+    } else if (s.type === 'quiz') {
+      const at = s.startTime + quizRevealAt(s);
+      // lighter celebration for a checkpoint reveal
+      drawConfettiBurst(ctx, W / 2, H * 0.32, time - at, 5100 + i * 23, 60, 1.8, 0.85);
+    }
+  }
+}
+
+/**
+ * How much idle "breathing" a full-frame card scene gets. Text/number-forward
+ * cards get a real drift; card types that still carry a bit of code or dense
+ * layout stay calmer so nothing gets hard to read.
+ */
+function breathFor(type: string): number {
+  switch (type) {
+    case 'title':
+    case 'chapter':
+    case 'quote':
+    case 'bigstat':
+      return 0.013; // the most "poster-like" — most room to breathe
+    case 'bullets':
+    case 'diagram':
+    case 'text':
+    case 'mascot':
+      return 0.009;
+    case 'quiz':
+    case 'challenge':
+      return 0.006; // interactive text to read — keep it gentle
+    // code / chrome surfaces: no breathing — monospace must stay pixel-crisp
+    case 'cli':
+    case 'split':
+    case 'api':
+    case 'pr':
+    case 'browserrec':
+    case 'viz':
+      return 0;
+    default:
+      return 0;
+  }
+}
+
+const ERROR_RE = /\b(error|traceback|exception|failed|fatal|panic|assert|✗|✘|FAIL)\b/i;
+
+/**
+ * A damped camera jolt on failure beats — a shocked mascot, or a terminal/CLI
+ * whose output reads as an error. Deterministic (seeded), so it renders
+ * identically every time. Returns the combined shake for the current frame.
+ */
+function errorShake(prep: Prepared, time: number): ShakeOffset {
+  let best: ShakeOffset = { dx: 0, dy: 0, rot: 0 };
+  const scenes = prep.dsl.scenes;
+  for (let i = 0; i < scenes.length; i++) {
+    const s = scenes[i];
+    let jolt = 0; // seconds since the jolt started, or -1 if inactive
+    if (s.type === 'mascot' && (s as MascotScene).action === 'shocked') {
+      jolt = time - s.startTime;
+    } else if (
+      (s.type === 'terminal' || s.type === 'cli') &&
+      ERROR_RE.test(((s as TerminalScene).output ?? (s as any).output ?? '') as string)
+    ) {
+      // the error line lands a beat after the command is entered
+      jolt = time - (s.startTime + Math.min(0.6, s.duration * 0.45));
+    }
+    if (jolt <= 0) continue;
+    const amp = s.type === 'mascot' ? 16 : 10;
+    const sh = shakeAt(jolt, 1009 + i * 31, amp, 0.55, 20);
+    if (Math.abs(sh.dx) + Math.abs(sh.dy) > Math.abs(best.dx) + Math.abs(best.dy)) best = sh;
+  }
+  return best;
+}
+
 // ── Backdrop: layered, slowly-drifting color field ─────────────────────────────
 function drawBackdrop(ctx: CanvasRenderingContext2D, dsl: AnimationDSL, time: number) {
   const W = dsl.width, H = dsl.height;
   ctx.fillStyle = ACTIVE_PACK.background || dsl.backgroundColor || '#0b0b10';
   ctx.fillRect(0, 0, W, H);
 
-  // two soft color blobs, drifting almost imperceptibly
-  const ax = W * (0.24 + 0.02 * Math.sin(time * 0.11));
-  const ay = H * (0.08 + 0.02 * Math.cos(time * 0.09));
+  // Chapter identity: each chapter nudges the color field so the video reads as
+  // moving through distinct "rooms" rather than one flat backdrop the whole way.
+  let chIdx = 0;
+  for (const s of dsl.scenes) if (s.type === 'chapter' && s.startTime <= time + 1e-6) chIdx++;
+  const ph = chIdx * 1.3; // phase offset per chapter
+  const drift = 0.03 * chIdx;
+
+  // two soft color blobs, drifting almost imperceptibly, repositioned per chapter
+  const ax = W * (0.24 + drift + 0.02 * Math.sin(time * 0.11 + ph));
+  const ay = H * (0.08 + 0.02 * Math.cos(time * 0.09 + ph));
   const a = ctx.createRadialGradient(ax, ay, 0, ax, ay, W * 0.52);
   a.addColorStop(0, ACTIVE_BLOB_A);
   a.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = a;
   ctx.fillRect(0, 0, W, H);
 
-  const bx = W * (0.84 + 0.02 * Math.cos(time * 0.08));
-  const by = H * (0.86 + 0.02 * Math.sin(time * 0.1));
+  const bx = W * (0.84 - drift + 0.02 * Math.cos(time * 0.08 + ph));
+  const by = H * (0.86 + 0.02 * Math.sin(time * 0.1 + ph));
   const b = ctx.createRadialGradient(bx, by, 0, bx, by, W * 0.45);
   b.addColorStop(0, ACTIVE_BLOB_B);
   b.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = b;
   ctx.fillRect(0, 0, W, H);
+
+  // a faint accent wash whose corner alternates by chapter — subtle mood shift
+  if (chIdx > 0) {
+    const corner = chIdx % 2 === 0 ? { x: W * 0.9, y: H * 0.15 } : { x: W * 0.1, y: H * 0.85 };
+    const wash = ctx.createRadialGradient(corner.x, corner.y, 0, corner.x, corner.y, W * 0.6);
+    wash.addColorStop(0, withAlpha(C.accent, 0.05));
+    wash.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = wash;
+    ctx.fillRect(0, 0, W, H);
+  }
 }
 
-/** Dip-to-black moments around chapter/title starts — reads as an edit cut. */
+/**
+ * A brief accent bloom at chapter/title starts. The themed *reveal* now handles
+ * the actual cut; this adds a soft light-lift on top so a new section lands with
+ * a beat of energy instead of a hard flash to black.
+ */
 function drawDips(ctx: CanvasRenderingContext2D, dsl: AnimationDSL, time: number, W: number, H: number) {
   let a = 0;
   for (const s of dsl.scenes) {
     if (s.type !== 'chapter' && s.type !== 'title') continue;
     if (s.startTime < 0.2) continue; // opening card fades in on its own
     const d = Math.abs(time - s.startTime);
-    if (d < 0.3) a = Math.max(a, easeInOut(1 - d / 0.3) * 0.85);
+    if (d < 0.28) a = Math.max(a, easeInOut(1 - d / 0.28) * 0.12);
   }
-  if (a > 0.01) {
-    ctx.fillStyle = `rgba(5,5,8,${a})`;
+  if (a > 0.004) {
+    const g = ctx.createRadialGradient(W / 2, H * 0.45, 0, W / 2, H * 0.45, W * 0.7);
+    g.addColorStop(0, withAlpha(C.accent, a));
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
   }
 }
@@ -482,7 +647,7 @@ function drawWorld(
       case 'viz': drawVizCard(ctx, card as VizScene, time, W, H); return;
       case 'ide': drawIdeCard(ctx, prep, card as IdeScene, time, W, H); return;
       case 'cli': drawCliCard(ctx, card as CliScene, time, W, H); return;
-      case 'browser': drawBrowserCard(ctx, card as BrowserScene, time, W, H); return;
+      case 'browser': drawBrowserCard(ctx, card as BrowserScene, time, W, H, prep.pageShots?.get(dsl.scenes.indexOf(card))); return;
       case 'browserrec': drawBrowserRecCard(ctx, prep, card as BrowserRecScene, time, W, H); return;
       case 'split': drawSplitCard(ctx, prep, card as SplitScene, time, W, H); return;
       case 'api': drawApiCard(ctx, card as ApiScene, time, W, H); return;
@@ -874,12 +1039,18 @@ function drawMorphPanel(ctx: CanvasRenderingContext2D, prep: Prepared, idx: numb
     let x: number;
     let y: number;
     let a = 1;
+    let color = tok.color;
     if (tok.kind === 'kept') {
-      if (atRest || tok.fromCol === tok.toCol && tok.fromRow === tok.toRow) {
+      const stationary = tok.fromCol === tok.toCol && tok.fromRow === tok.toRow;
+      if (atRest || stationary) {
         x = colX(tok.toCol); y = rowY(tok.toRow);
       } else {
         x = lerp(colX(tok.fromCol), colX(tok.toCol), moveP);
         y = lerp(rowY(tok.fromRow), rowY(tok.toRow), moveP);
+      }
+      // Magic-Move color morph: recolored tokens blend from→to across the slide.
+      if (!atRest && tok.fromColor && tok.fromColor !== tok.color) {
+        color = mixHex(tok.fromColor, tok.color, moveP);
       }
     } else if (tok.kind === 'remove') {
       const fade = 1 - easeInOut(clamp((local - T.moveStart) / 0.35, 0, 1));
@@ -889,15 +1060,16 @@ function drawMorphPanel(ctx: CanvasRenderingContext2D, prep: Prepared, idx: numb
       y = rowY(tok.fromRow) + (1 - fade) * 8;
     } else {
       const at = rowRevealAt(tok.toRow) + Math.min(0.12, tok.toCol * 0.006);
-      const p = easeOutCubic(clamp((local - at) / T.lineReveal, 0, 1));
+      const p = clamp((local - at) / T.lineReveal, 0, 1);
       if (p <= 0.01) continue;
-      a = p;
+      a = easeOutCubic(p);
+      // spring landing: the line settles from below with a touch of overshoot
+      const settle = easeOutBack(p, 2.2);
       x = colX(tok.toCol);
-      y = rowY(tok.toRow) - (1 - p) * 10;
-      if (p >= 0.999) { /* landed — draw on the grid */ }
+      y = rowY(tok.toRow) - (1 - settle) * 12;
     }
     ctx.globalAlpha = a;
-    ctx.fillStyle = tok.color;
+    ctx.fillStyle = color;
     // integer pixels keep glyphs sharp; monospace advance == charW so the whole
     // string lands exactly where per-character placement would, but crisper
     ctx.fillText(tok.text, Math.round(x), Math.round(y));
@@ -909,26 +1081,50 @@ function drawMorphPanel(ctx: CanvasRenderingContext2D, prep: Prepared, idx: numb
   return { runBtn: { x: rect.x + rect.w - btnW - 16, y: rect.y + (TITLE_H - btnH) / 2, w: btnW, h: btnH } };
 }
 
-// ── Run button + minimal click feedback ───────────────────────────────────────────
+// ── Run button + click feedback (spring press physics) ────────────────────────────
 function drawRunButton(ctx: CanvasRenderingContext2D, b: Rect, press: number) {
   const active = press >= 0;
+  // Depress physics: on click the button dips in (scale + drops onto the page),
+  // then springs back. `press` is 0→1 over the click; the dip lives in the first
+  // third and springs out after.
+  let scale = 1;
+  let sink = 0; // px the button sinks toward the surface
+  let lift = 6; // resting drop-shadow distance
+  if (active) {
+    const dip = press < 0.28 ? easeOutCubic(press / 0.28) : 1 - springOut(clamp((press - 0.28) / 0.5, 0, 1));
+    scale = 1 - dip * 0.06;
+    sink = dip * 3;
+    lift = 6 - dip * 5;
+  }
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2 + sink;
   ctx.save();
-  const grad = ctx.createLinearGradient(b.x, b.y, b.x, b.y + b.h);
+  ctx.translate(cx, cy);
+  ctx.scale(scale, scale);
+  ctx.translate(-cx, -cy);
+
+  // drop shadow beneath the button — tightens as it presses down
+  ctx.save();
+  ctx.shadowColor = 'rgba(6,40,26,0.5)';
+  ctx.shadowBlur = lift * 2.5;
+  ctx.shadowOffsetY = lift;
+  const grad = ctx.createLinearGradient(b.x, b.y + sink, b.x, b.y + b.h + sink);
   if (active) { grad.addColorStop(0, '#34d399'); grad.addColorStop(1, '#10b981'); }
   else { grad.addColorStop(0, 'rgba(52,211,153,0.20)'); grad.addColorStop(1, 'rgba(16,185,129,0.12)'); }
   ctx.fillStyle = grad;
-  roundRect(ctx, b.x, b.y, b.w, b.h, 9);
+  roundRect(ctx, b.x, b.y + sink, b.w, b.h, 9);
   ctx.fill();
+  ctx.restore();
+
   ctx.strokeStyle = active ? '#6ee7b7' : 'rgba(52,211,153,0.45)';
   ctx.lineWidth = 1.5;
-  roundRect(ctx, b.x, b.y, b.w, b.h, 9);
+  roundRect(ctx, b.x, b.y + sink, b.w, b.h, 9);
   ctx.stroke();
   ctx.fillStyle = active ? '#052e1a' : C.green;
   ctx.font = `600 ${Math.round(b.h * 0.42)}px ${MONO}`;
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'center';
-  ctx.fillText('Run', b.x + b.w / 2 + 6, b.y + b.h / 2 + 1);
-  const ty = b.y + b.h / 2, tx = b.x + 20;
+  ctx.fillText('Run', b.x + b.w / 2 + 6, b.y + b.h / 2 + 1 + sink);
+  const ty = b.y + b.h / 2 + sink, tx = b.x + 20;
   ctx.beginPath();
   ctx.moveTo(tx, ty - 6); ctx.lineTo(tx + 10, ty); ctx.lineTo(tx, ty + 6); ctx.closePath();
   ctx.fill();
@@ -937,15 +1133,19 @@ function drawRunButton(ctx: CanvasRenderingContext2D, b: Rect, press: number) {
 }
 
 function drawClickFx(ctx: CanvasRenderingContext2D, b: Rect, time: number, start: number) {
-  // one soft ring — clean feedback, nothing more
+  // two staggered ripple rings — reads as a real tap, still clean
   const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-  const t = clamp((time - start) / 0.45, 0, 1);
   ctx.save();
-  ctx.strokeStyle = `rgba(110,231,183,${(1 - t) * 0.6})`;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(cx, cy, 6 + t * 40, 0, Math.PI * 2);
-  ctx.stroke();
+  for (let ring = 0; ring < 2; ring++) {
+    const t = clamp((time - start - ring * 0.09) / 0.5, 0, 1);
+    if (t <= 0 || t >= 1) continue;
+    const e = easeOutCubic(t);
+    ctx.strokeStyle = `rgba(110,231,183,${(1 - t) * (ring === 0 ? 0.6 : 0.35)})`;
+    ctx.lineWidth = 2 - ring;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 6 + e * (40 + ring * 18), 0, Math.PI * 2);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -1294,14 +1494,52 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
     ctx.globalAlpha = a;
   }
 
-  // node geometry
+  // node geometry — clamp inside the frame and nudge overlaps apart so the model's
+  // raw x/y fractions can't push boxes off-screen or stack them on top of each other.
   ctx.font = `600 ${fs}px ${MONO}`;
   const boxes = new Map<string, Rect>();
+  const margin = Math.round(W * 0.04);
+  // auto-layout via dagre when the model omitted meaningful coordinates
+  const auto = wantsAutoLayout(scene) ? diagramLayout(scene, scene.layoutDir ?? 'LR') : null;
   for (const n of scene.nodes) {
     const tw = ctx.measureText(n.label).width;
     const w = tw + fs * 2.2;
     const h = fs * 2.6;
-    boxes.set(n.id, { x: n.x * W - w / 2, y: n.y * H - h / 2, w, h });
+    const pos = auto?.get(n.id) ?? { x: n.x, y: n.y };
+    const x = clamp(pos.x * W - w / 2, margin, W - margin - w);
+    const y = clamp(pos.y * H - h / 2, margin, H - margin - h);
+    boxes.set(n.id, { x, y, w, h });
+  }
+  // a few relaxation passes: separate any pair of boxes that overlap
+  const gap = fs * 0.6;
+  const arr = Array.from(boxes.values());
+  for (let pass = 0; pass < 6; pass++) {
+    let moved = false;
+    for (let i = 0; i < arr.length; i++) {
+      for (let j = i + 1; j < arr.length; j++) {
+        const A = arr[i], B = arr[j];
+        const ox = Math.min(A.x + A.w, B.x + B.w) - Math.max(A.x, B.x);
+        const oy = Math.min(A.y + A.h, B.y + B.h) - Math.max(A.y, B.y);
+        if (ox > -gap && oy > -gap) {
+          // push apart along the axis of least overlap
+          if (ox < oy) {
+            const push = (ox + gap) / 2;
+            const dir = A.x <= B.x ? 1 : -1;
+            A.x -= dir * push; B.x += dir * push;
+          } else {
+            const push = (oy + gap) / 2;
+            const dir = A.y <= B.y ? 1 : -1;
+            A.y -= dir * push; B.y += dir * push;
+          }
+          moved = true;
+        }
+      }
+    }
+    for (const b of arr) {
+      b.x = clamp(b.x, margin, W - margin - b.w);
+      b.y = clamp(b.y, margin, H - margin - b.h);
+    }
+    if (!moved) break;
   }
 
   const nodeStep = 0.28;
@@ -1326,35 +1564,77 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
     const trim2 = Math.min(Math.abs(toR.w / 2 / (ux || 1e-9)), Math.abs(toR.h / 2 / (uy || 1e-9))) + 14;
     const sx = x1 + ux * trim1, sy = y1 + uy * trim1;
     const ex = x2 - ux * trim2, ey = y2 - uy * trim2;
-    const hx = lerp(sx, ex, p), hy = lerp(sy, ey, p);
 
-    ctx.strokeStyle = 'rgba(167,139,250,0.6)';
+    // gentle quadratic bow so parallel/crossing edges read cleanly; the control
+    // point sits perpendicular to the midpoint. A bezier point at parameter t:
+    const bow = Math.min(len * 0.12, 46) * (i % 2 === 0 ? 1 : -1);
+    const mx = (sx + ex) / 2 - uy * bow;
+    const my = (sy + ey) / 2 + ux * bow;
+    const bez = (t: number) => {
+      const it = 1 - t;
+      return {
+        x: it * it * sx + 2 * it * t * mx + t * t * ex,
+        y: it * it * sy + 2 * it * t * my + t * t * ey,
+      };
+    };
+
+    ctx.strokeStyle = 'rgba(167,139,250,0.55)';
     ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(sx, sy);
-    ctx.lineTo(hx, hy);
+    // draw the partially-revealed curve up to progress p
+    const STEPS = 22;
+    for (let s = 1; s <= STEPS; s++) {
+      const t = (s / STEPS) * p;
+      const pt = bez(t);
+      ctx.lineTo(pt.x, pt.y);
+    }
     ctx.stroke();
 
     if (p >= 1) {
-      // arrowhead
-      ctx.fillStyle = 'rgba(167,139,250,0.85)';
+      // arrowhead aligned to the curve's incoming tangent
+      const tip = bez(1), near = bez(0.94);
+      const adx = tip.x - near.x, ady = tip.y - near.y;
+      const al = Math.hypot(adx, ady) || 1;
+      const axu = adx / al, ayu = ady / al;
+      ctx.fillStyle = 'rgba(167,139,250,0.9)';
       ctx.beginPath();
-      ctx.moveTo(ex + ux * 12, ey + uy * 12);
-      ctx.lineTo(ex - uy * 6, ey + ux * 6);
-      ctx.lineTo(ex + uy * 6, ey - ux * 6);
+      ctx.moveTo(tip.x + axu * 10, tip.y + ayu * 10);
+      ctx.lineTo(tip.x - ayu * 7, tip.y + axu * 7);
+      ctx.lineTo(tip.x + ayu * 7, tip.y - axu * 7);
       ctx.closePath();
       ctx.fill();
+
+      // ByteByteGo-style flow pulse: a glowing dot travels along the edge to show
+      // data moving. Phase-offset per edge; deterministic from `local`.
+      const period = 2.4;
+      const phase = ((local + i * 0.7) % period) / period;
+      const pp = bez(phase);
+      const glow = Math.sin(phase * Math.PI); // fade at the ends
+      ctx.save();
+      ctx.globalAlpha = a * glow;
+      ctx.shadowColor = 'rgba(167,139,250,0.9)';
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = '#c4b5fd';
+      ctx.beginPath();
+      ctx.arc(pp.x, pp.y, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
     if (e.label && p > 0.6) {
       ctx.globalAlpha = a * clamp((p - 0.6) / 0.4, 0, 1);
       ctx.font = `500 ${Math.round(fs * 0.72)}px ${MONO}`;
       ctx.textAlign = 'center';
-      const mx = (sx + ex) / 2, my = (sy + ey) / 2;
+      const mid = bez(0.5); // sit the label on the curve, not the chord
       const lw = ctx.measureText(e.label).width;
-      ctx.fillStyle = '#0b0b10';
-      ctx.fillRect(mx - lw / 2 - 8, my - fs * 0.7, lw + 16, fs * 1.2);
+      ctx.fillStyle = withAlpha(ACTIVE_PACK.background || '#0b0b10', 0.92);
+      roundRect(ctx, mid.x - lw / 2 - 10, mid.y - fs * 0.72, lw + 20, fs * 1.24, 6);
+      ctx.fill();
       ctx.fillStyle = C.dim;
-      ctx.fillText(e.label, mx, my);
+      ctx.textBaseline = 'middle';
+      ctx.fillText(e.label, mid.x, mid.y + 1);
+      ctx.textBaseline = 'alphabetic';
       ctx.textAlign = 'left';
       ctx.font = `600 ${fs}px ${MONO}`;
       ctx.globalAlpha = a;
@@ -1388,10 +1668,22 @@ function drawDiagramCard(ctx: CanvasRenderingContext2D, scene: DiagramScene, tim
       sketchRoundRect(ctx, r.x, r.y, r.w, r.h, 13);
       ctx.stroke();
     } else {
+      // gradient fill + glass top edge so the node reads as a raised chip
+      const ng = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
+      ng.addColorStop(0, '#22222d');
+      ng.addColorStop(1, '#15151c');
+      ctx.fillStyle = ng;
       roundRect(ctx, r.x, r.y, r.w, r.h, 13);
       ctx.fill();
       ctx.shadowBlur = 0;
-      ctx.strokeStyle = withAlpha(accent, 0.65);
+      // top inner highlight
+      ctx.save();
+      roundRect(ctx, r.x, r.y, r.w, r.h, 13);
+      ctx.clip();
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.fillRect(r.x, r.y, r.w, 2);
+      ctx.restore();
+      ctx.strokeStyle = withAlpha(accent, 0.7);
       ctx.lineWidth = 1.5;
       roundRect(ctx, r.x, r.y, r.w, r.h, 13);
       ctx.stroke();
@@ -1707,11 +1999,45 @@ function drawChallengeCard(ctx: CanvasRenderingContext2D, scene: ChallengeScene,
   const local = time - scene.startTime;
   const enter = easeOutCubic(clamp(local / 0.55, 0, 1));
   const cardW = Math.min(W * 0.66, 1240);
-  const cardH = Math.min(H * 0.62, 640);
   const cx = W / 2 - cardW / 2;
-  const cy = H / 2 - cardH / 2;
+  const pad = 44;
+  const innerW = cardW - pad * 2;
   // export reveals the solution partway through; interactive never does
   const reveal = !ui?.interactive && local > Math.min(scene.duration * 0.5, 4);
+
+  // ── Measure everything FIRST, then size the card to fit. The prompt shrinks to
+  // fit (never sliced), and code lines soft-wrap + shrink so nothing runs off. ──
+  const ebFs = Math.round(H / 60);
+  const pFs0 = Math.round(H / 28);
+  const prompt = fitLines(ctx, scene.prompt || '', innerW, pFs0, {
+    minFs: Math.round(pFs0 * 0.62), maxLines: 5, weight: 700, family: MONO,
+  });
+  const promptLH = prompt.fs * 1.35;
+  const promptH = prompt.lines.length * promptLH;
+
+  let codeFs = Math.round(H / 40);
+  ctx.font = `${codeFs}px ${MONO}`;
+  const codeCW = ctx.measureText('M').width;
+  const maxCols = Math.max(8, Math.floor((innerW - 40) / codeCW));
+  const src = ((reveal ? scene.solution : scene.starterCode) || '').replace(/\t/g, '  ');
+  const codeLines: string[] = [];
+  for (const raw of src.split('\n')) {
+    if (raw.length <= maxCols) { codeLines.push(raw); continue; }
+    const indent = raw.match(/^\s*/)?.[0] ?? '';
+    let rest = raw, first = true;
+    while (rest.length > maxCols) {
+      let cut = rest.lastIndexOf(' ', maxCols);
+      if (cut < maxCols * 0.5) cut = maxCols;
+      codeLines.push((first ? '' : indent + '  ') + rest.slice(0, cut).replace(/\s+$/, ''));
+      rest = rest.slice(cut).replace(/^\s+/, ''); first = false;
+    }
+    codeLines.push((first ? '' : indent + '  ') + rest);
+  }
+
+  const eyebrowBlock = pad + ebFs + 30;
+  const wantH = eyebrowBlock + promptH + 14 + (codeLines.length * codeFs * 1.5 + 40) + pad;
+  const cardH = clamp(wantH, Math.min(H * 0.5, 520), H * 0.84);
+  const cy = H / 2 - cardH / 2;
 
   ctx.save();
   ctx.globalAlpha = a * enter;
@@ -1730,38 +2056,39 @@ function drawChallengeCard(ctx: CanvasRenderingContext2D, scene: ChallengeScene,
   roundRect(ctx, cx, cy, cardW, cardH, 22);
   ctx.stroke();
 
-  const pad = 44;
   // eyebrow
-  const ebFs = Math.round(H / 60);
   ctx.font = `700 ${ebFs}px ${MONO}`;
   ctx.fillStyle = C.green;
   ctx.fillText('◆ YOUR TURN', cx + pad, cy + pad + ebFs);
 
-  // prompt
-  const pFs = Math.round(H / 28);
-  ctx.font = `700 ${pFs}px ${MONO}`;
+  // prompt (shrunk to fit — never truncated)
+  ctx.font = `700 ${prompt.fs}px ${MONO}`;
   ctx.fillStyle = C.text;
-  const pLines = wrapText(ctx, scene.prompt, cardW - pad * 2).slice(0, 3);
-  let y = cy + pad + ebFs + 30 + pFs;
-  for (const l of pLines) { ctx.fillText(l, cx + pad, y); y += pFs * 1.35; }
+  let y = cy + eyebrowBlock + prompt.fs;
+  for (const l of prompt.lines) { ctx.fillText(l, cx + pad, y); y += promptLH; }
 
   // code box (starter, or the solution on export reveal)
-  const boxY = y + 14;
+  const boxY = y + 8;
   const boxH = cy + cardH - pad - boxY;
   ctx.fillStyle = '#0e0e14';
-  roundRect(ctx, cx + pad, boxY, cardW - pad * 2, boxH, 12);
+  roundRect(ctx, cx + pad, boxY, innerW, boxH, 12);
   ctx.fill();
   ctx.strokeStyle = C.sep;
-  roundRect(ctx, cx + pad, boxY, cardW - pad * 2, boxH, 12);
+  roundRect(ctx, cx + pad, boxY, innerW, boxH, 12);
   ctx.stroke();
 
-  const codeFs = Math.round(H / 40);
+  // shrink the code font if the (capped) box can't hold every line — never drop lines
+  const needH = codeLines.length * codeFs * 1.5 + 24;
+  if (needH > boxH) codeFs = Math.max(12, Math.floor((boxH - 24) / (codeLines.length * 1.5)));
+  const codeLH = codeFs * 1.5;
+  ctx.save();
+  roundRect(ctx, cx + pad, boxY, innerW, boxH, 12); ctx.clip();
   ctx.font = `${codeFs}px ${MONO}`;
   ctx.fillStyle = reveal ? C.terminal : C.dim;
-  const src = (reveal ? scene.solution : scene.starterCode) || '';
-  src.split('\n').slice(0, Math.floor((boxH - 24) / (codeFs * 1.5))).forEach((line, i) => {
-    ctx.fillText(line, cx + pad + 20, boxY + 24 + codeFs + i * codeFs * 1.5);
+  codeLines.forEach((line, i) => {
+    ctx.fillText(line, cx + pad + 20, boxY + 24 + codeFs + i * codeLH);
   });
+  ctx.restore();
 
   // footer label
   ctx.font = `500 ${Math.round(H / 52)}px ${MONO}`;
@@ -1834,8 +2161,9 @@ function drawVizCard(ctx: CanvasRenderingContext2D, scene: VizScene, time: numbe
   const maxLen = Math.max(1, ...scene.steps.map((s) => s.array?.length || 0));
   const hasStack = scene.steps.some((s) => (s.stack?.length || 0) > 0);
   const arrAreaW = (hasStack ? W * 0.62 : W * 0.82);
-  const cw = Math.min(122, arrAreaW / maxLen - 14);
   const gap = 14;
+  // floor keeps cells legible; if the row would exceed the area, gap absorbs it
+  const cw = Math.max(44, Math.min(122, arrAreaW / maxLen - gap));
   const rowW = maxLen * cw + (maxLen - 1) * gap;
   const arrCX = hasStack ? W * 0.40 : W / 2;
   const cx0 = arrCX - rowW / 2;
@@ -1878,11 +2206,16 @@ function drawVizCard(ctx: CanvasRenderingContext2D, scene: VizScene, time: numbe
       ctx.globalAlpha = a * (changed ? 0.5 + 0.5 * tp : 1);
       ctx.translate(x + cw / 2, arrY + cw / 2);
       ctx.scale(pop, pop);
-      ctx.font = `700 ${Math.round(cw * 0.4)}px ${MONO}`;
+      const valStr = String(arr[i]);
+      let vfs = Math.round(cw * 0.4);
+      ctx.font = `700 ${vfs}px ${MONO}`;
+      while (vfs > 10 && ctx.measureText(valStr).width > cw * 0.82) {
+        vfs = Math.round(vfs * 0.88); ctx.font = `700 ${vfs}px ${MONO}`;
+      }
       ctx.fillStyle = C.text;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(String(arr[i]), 0, 1);
+      ctx.fillText(valStr, 0, 1);
       ctx.restore();
 
       // index label
@@ -2072,12 +2405,13 @@ function captionPagesFor(prep: Prepared, sceneIndex: number): CaptionPage[] {
   const words = prep.words?.get(sceneIndex);
   // narrow (9:16) frames take fewer words per page so the pill fits
   const maxChars = prep.dsl.width < prep.dsl.height ? 24 : 42;
+  const spoken = spokenNarration(scene);
   const pages =
     words && words.length
       ? buildCaptionPages(words, maxChars)
-      : scene.narration
+      : spoken
         ? estimatedCaptionPages(
-            scene.narration,
+            spoken,
             Math.min(scene.narrationDuration ?? scene.duration, scene.duration),
             maxChars,
           )
@@ -2094,7 +2428,7 @@ function drawNarrationCaption(ctx: CanvasRenderingContext2D, prep: Prepared, tim
   let scene: (typeof dsl.scenes)[number] | null = null;
   let sceneIndex = -1;
   dsl.scenes.forEach((s, i) => {
-    if (!s.narration) return;
+    if (!spokenNarration(s)) return;
     const speech = s.narrationDuration ?? s.duration;
     if (time >= s.startTime && time < s.startTime + Math.min(speech + 0.3, s.duration)) {
       if (!scene || s.startTime >= scene.startTime) { scene = s; sceneIndex = i; }
@@ -2232,21 +2566,18 @@ function drawCardTransition(
   W: number,
   H: number,
 ) {
-  if (!card || !('transition' in card) || !card.transition || card.transition === 'none') return;
+  if (!card || card.startTime < 0.05) return; // opening scene fades in on its own
+  const authored = ('transition' in card ? card.transition : undefined) as string | undefined;
+  if (authored === 'none') return;
+  const kind = authored || defaultTransition(card.type);
   const local = time - card.startTime;
-  if (local > 0.55) return;
-  const p = easeOutCubic(clamp(local / 0.45, 0, 1));
-  const inv = 1 - p;
-  if (card.transition === 'fade') {
-    ctx.fillStyle = `rgba(0,0,0,${inv * 0.85})`;
-    ctx.fillRect(0, 0, W, H);
-  } else if (card.transition === 'slide' || card.transition === 'push') {
-    ctx.fillStyle = `rgba(0,0,0,${inv * 0.5})`;
-    ctx.fillRect(0, 0, W * inv, H);
-  } else if (card.transition === 'zoom') {
-    ctx.fillStyle = `rgba(0,0,0,${inv * 0.7})`;
-    ctx.fillRect(0, 0, W, H);
-  }
+  const WIN = 0.6;
+  if (local < 0 || local > WIN) return;
+  // linear progress — drawReveal applies its own easing (avoid double-ease which
+  // made transitions finish in a blink).
+  const p = clamp(local / (WIN - 0.06), 0, 1);
+  const colors = { veil: ACTIVE_PACK.background || '#08080c', accent: C.accent };
+  drawReveal(ctx, kind, p, W, H, colors);
 }
 
 // ── Composite layout card ───────────────────────────────────────────────────────
@@ -2340,6 +2671,10 @@ function drawLayoutCard(
       const shown = clamp(Math.floor((local - start) / per) + 1, 0, blocks.length);
       const frac = clamp((local - start) / per - (shown - 1), 0, 1);
       drawPageBlocks(ctx, blocks, pageRect, shown, frac, th, Math.round(H / 52));
+      // drawBrowserChrome → drawWindowFrame leaves one unbalanced save+clip (the
+      // "caller restores" contract); balance it so the region clip below pops the
+      // right state — otherwise the save stack grows every frame (nondeterminism).
+      ctx.restore();
     } else if (region.type === 'cli') {
       const cliScene: CliScene = {
         type: 'cli',

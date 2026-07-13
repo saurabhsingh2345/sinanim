@@ -24,7 +24,7 @@ import { Conductor } from '../lib/conductor';
 import { SfxCollector, SfxEvent, SampleBuffers } from '../lib/sounds';
 import { splitSentences, stitchClips } from '../lib/narration';
 import { prosodyPlan } from '../lib/prosody';
-import { hasStepNarration, stepStartsFromSentences } from '../lib/step-sync';
+import { hasStepNarration, stepStartsFromSentences, spokenNarration } from '../lib/step-sync';
 import { SynthesizedClip } from '../lib/tts';
 import { WordTiming, buildWordTimeline, SentenceClipInfo } from '../lib/word-timeline';
 
@@ -101,11 +101,19 @@ function loadSfx(): SampleBuffers {
       .map(load).filter(Boolean) as AudioBuffer[],
     space: load('space.wav'),
     enter: load('enter.wav'),
+    back: load('back.wav'),
     click: load('click.wav'),
     whoosh: load('whoosh.wav'),
+    swish: load('swish.wav'),
     pop: load('pop.wav'),
+    tick: load('tick.wav'),
     chime: load('chime.wav'),
     buzz: load('buzz.wav'),
+    hover: load('hover.wav'),
+    send: load('send.wav'),
+    ting: load('ting.wav'),
+    success: load('success.wav'),
+    bed: load('bed.wav'),
   };
 }
 
@@ -176,7 +184,7 @@ async function synthesizeNarration(dsl: AnimationDSL, voice: string) {
   const words = new Map<number, WordTiming[]>();
   const stepSync = new Map<number, number[]>();
   const narrated = dsl.scenes
-    .map((s, i) => ({ i, sentences: s.narration ? splitSentences(s.narration) : [] }))
+    .map((s, i) => ({ i, sentences: splitSentences(spokenNarration(s)) }))
     .filter((x) => x.sentences.length > 0);
 
   const total = narrated.reduce((a, n) => a + n.sentences.length, 0);
@@ -219,9 +227,16 @@ async function synthesizeNarration(dsl: AnimationDSL, voice: string) {
 // ── One lesson → one MP4 ────────────────────────────────────────────────────────
 async function renderOne(raw: any, outPath: string, voice: string, voiceOn: boolean) {
   let dsl = repace(normalizeDSL(raw));
+  // Capture REAL screenshots for any `browser` scenes with a URL before render.
+  try {
+    const { ensureBrowserShots } = await import('../lib/render/capture-page');
+    await ensureBrowserShots(dsl);
+  } catch (e) {
+    console.warn('[render] browser-shot capture skipped:', (e as Error).message);
+  }
   let buffers = new Map<number, AudioBuffer>();
   let words = new Map<number, WordTiming[]>();
-  if (voiceOn && dsl.scenes.some((s) => s.narration)) {
+  if (voiceOn && dsl.scenes.some((s) => spokenNarration(s))) {
     const res = await synthesizeNarration(dsl, voice);
     dsl = res.dsl;
     buffers = res.buffers;

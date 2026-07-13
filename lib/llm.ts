@@ -1,10 +1,11 @@
-import { AnimationDSL } from './types';
+import { AnimationDSL, PRIMARY_CARD_TYPES } from './types';
 import { normalizeDSL, extractJSON, repace } from './dsl';
 import { matchRecipe, recipePromptBlock } from './recipes';
 import { SPOKEN_STYLE_RULES, lintReport, lintScript } from './script-lint';
 import { GenerateOptions, chatJSON, resolveProvider } from './llm-core';
 import { LessonPlan, planLesson, planPromptBlock } from './authoring/planner';
 import { pickBetter } from './authoring/judge';
+import { spokenNarration } from './step-sync';
 
 // Provider plumbing lives in lib/llm-core.ts; re-exported here so existing
 // imports (API routes, course.ts) keep working unchanged.
@@ -101,10 +102,11 @@ SCENE TYPES (every scene needs "startTime" and "duration" in seconds; all accept
 - challenge: { "type":"challenge", "language":"python", "prompt":"Write a function is_even(n) that returns True for even numbers.", "starterCode":"def is_even(n):\n    # your code here\n    pass", "solution":"def is_even(n):\n    return n % 2 == 0", "tests":[{"expression":"is_even(4)","expected":"True"},{"expression":"is_even(7)","expected":"False"}], "hint":"The modulo operator % gives a remainder.", "concept":"modulo / even numbers", "startTime":30, "duration":12, "narration":"Now it's your turn — give this a real go." }  — a REAL coding challenge (Python or JavaScript only): the player pauses, the learner WRITES code, and it is executed against the tests. Each test's "expression" is evaluated right after the learner's code and its printed value is compared to "expected". Rules: 2-4 tests; "expected" must be EXACTLY what printing that expression produces (e.g. Python True/False, a list like [1, 4, 9]); "starterCode" is a clear scaffold with the signature and a TODO; "solution" must actually pass every test. Include AT MOST ONE challenge, near the end, for a hands-on concept.
 - code:     { "type":"code", "language":"python", "code":"...", "title":"main.py", "startTime":3, "duration":5, "narration":"..." }  — the code lands with an animated line cascade (fast and calm, never typed out character by character), then holds while you narrate through it.
 - diff:     { "type":"diff", "language":"python", "before":"<full old snippet>", "after":"<full new snippet>", "title":"main.py", "startTime":8, "duration":6, "narration":"..." }  — MAGIC-MOVE morph for short panel evolutions. Prefer evolving code inside an "ide" type/run sequence for full lessons; use "diff" only when a compact before→after panel is clearer than a full IDE.
-- terminal: { "type":"terminal", "output":"...", "prompt":"$ ", "typingSpeed":40, "startTime":14, "duration":3, "sound":true, "narration":"..." }
+- terminal: { "type":"terminal", "output":"...", "prompt":"$ ", "typingSpeed":40, "startTime":14, "duration":3, "sound":true, "narration":"..." }  — OUTPUT ONLY. Shows the result of code the learner has ALREADY seen in a preceding "code" or "ide" panel. It renders NO code, so it CANNOT teach or explain code — a terminal by itself is meaningless. Use AT MOST ONE, and only right after a code/ide scene. If you are reaching for a second terminal, you actually want an "ide" scene (type the code, then a "run" step). NEVER build a lesson out of terminal scenes.
 - ide:      { "type":"ide", "project":"todo-api", "files":[{"path":"app.py","language":"python"}], "steps":[ {"caption":"Start with the data","action":{"kind":"type","file":"app.py","code":"todos = []\n\ndef add(text):\n    todos.append({'text': text, 'done': False})"}, "narration":"Let's build this from the data up. First an empty list called todos - that's our whole database for now. Then a function, add, that appends a small dictionary: the text we were given, and a done flag that starts as false."}, {"caption":"Why a dictionary?","action":{"kind":"explain","file":"app.py","startLine":4,"endLine":4}, "narration":"Pause on line four for a second. We could have appended just the text string. But the moment we want to mark a todo as finished, we'd have nowhere to put that fact. The dictionary buys us room to grow - every todo carries its own state."}, {"caption":"Try it","action":{"kind":"type","file":"app.py","code":"todos = []\n\ndef add(text):\n    todos.append({'text': text, 'done': False})\n\nadd('ship the demo')\nprint(todos)"}, "narration":"Now let's actually call it. We add one todo - ship the demo - and print the list to see what we've got."}, {"caption":"Run it","action":{"kind":"run","command":"python app.py","output":"[{'text': 'ship the demo', 'done': False}]"}, "narration":"Moment of truth. We run the file."}, {"caption":"Read the output","action":{"kind":"explain","terminal":true}, "narration":"And there it is. One dictionary in the list, exactly the shape we designed: the text we passed in, and done false because nobody has finished it yet. When you can predict the output before you run it, the model in your head matches the machine - that's the goal."} ], "startTime":10, "duration":60, "narration":"..." }  - a FULL VS Code workspace on screen: file explorer + editor tabs + integrated terminal, all evolving. THE FLAGSHIP SURFACE - treat it like a patient teacher at a whiteboard, not a speedrun.
   EVERY STEP CARRIES ITS OWN "narration" (2-4 spoken sentences). The engine starts each step EXACTLY when its first narration sentence is spoken and holds the frame while the voice continues - so long, generous explanations are safe and encouraged. NEVER put the ide teaching text only in the scene-level "narration"; the scene-level narration is at most a 1-2 sentence intro.
-  Action kinds: "open" (focus a file tab), "create" (a mouse cursor names a NEW file live), "type" (file + full "code" for that file - successive types on the same file read as edits, so give the WHOLE file each time), "run" (a terminal "command" + its exact "output"), "highlight" (glow lines startLine..endLine), "explain" (THE TEACHING BEAT: nothing changes on screen; glow lines startLine..endLine while the voice walks through them, or set "terminal":true to zoom the terminal while the voice reads the output).
+  Action kinds: "open" (focus a file tab), "create" (a mouse cursor names a NEW file live), "type" (file + full "code" for that file - successive types on the same file read as edits, so give the WHOLE file each time), "run" (a terminal "command" + its exact "output"; add "creates":["src/App.jsx","index.html"] for a scaffolder like 'npm create vite' so the generated files POP INTO THE FILE TREE — then "open" one and "type" real code into it), "highlight" (glow lines startLine..endLine), "explain" (THE TEACHING BEAT: nothing changes on screen; glow lines startLine..endLine while the voice walks through them, or set "terminal":true to zoom the terminal while the voice reads the output).
+  ONE PERSISTENT WORKSPACE: the file tree + every file's contents PERSIST across the whole lesson. STRONGLY PREFER a single "ide" scene with many steps. If you do use a second "ide" scene later, the earlier files and their code are STILL THERE — do NOT retype them from scratch. To keep editing a file, "open" it and "type" the WHOLE file so far (its prior lines + the new ones); the engine shows the old code instantly and types only what's new, in place. To add a brand-new file mid-lesson use "create" (or a "run" with "creates"). Never restart a file from line one when its code already exists.
   THE RHYTHM (mandatory): type a SMALL chunk (3-6 lines) -> "explain" the interesting lines (what they do, why this way, what would break otherwise) -> type the next chunk -> explain -> "run" -> "explain" with terminal:true that interprets the output. Never two type steps in a row without an explain between them. Every "run" is followed by an explain of what the output MEANS.
   8-16 steps is normal; a good ide scene runs 60-120 seconds of speech. List every file a step touches in "files" (path + language; folders come from "/" in the path) - but only if it already exists at the start; files first touched by "create"/"type" pop into the tree live. Keep each file <= ~18 lines and each typed chunk small. Optional "key" per step (a shortcut chip, e.g. "⌘S"). The camera auto-zooms to whatever each step touches.
 - cli:      { "type":"cli", "title":"zsh — ~/app", "cwd":"~/app", "commands":[ {"command":"npm create vite@latest my-app","output":"✔ Scaffolded ./my-app"}, {"command":"npm install","output":"added 231 packages in 3s"}, {"command":"npm run dev","output":"VITE ready\n➜ Local: http://localhost:5173/"} ], "startTime":10, "duration":16, "narration":"..." }  — a full-screen TERMINAL session: each command types at the prompt, then its output streams (errors go red, success/urls tinted). Replaces an asciinema recording. 2-6 commands; output must be realistic.
@@ -138,6 +140,9 @@ RULES:
 - Prefer "ide" with a "run" step for coding demos. IDE run "output" must match what the file would print.
 - Use real, correct, runnable code. Keep each typed file ≤ ~18 lines.
 - SELF-CONTAINED: any runnable snippet (ide type/run or code+terminal) must be a COMPLETE program.
+- NEVER teach code through "terminal" scenes. A terminal shows OUTPUT, not code — a lesson built from terminal cards teaches nothing. To teach code you MUST use "ide" (type the code, explain it, then "run"). At most ONE terminal per lesson, only after a code/ide panel. If your draft has two or more terminals, fold them into an ide walkthrough.
+- IDE type steps are CUMULATIVE: each "type" step's "code" is the WHOLE file so far (previous lines included), extended with the new lines. Never send only the new chunk — that erases the earlier lines. Small edit-in-place additions still repeat the full file with the new lines appended.
+- Keep every IDE file clean, like real code a developer would commit: NEVER repeat a line you already typed, no dead/duplicate statements, logical top-to-bottom order (define before use, except when you are deliberately showing an error). The final file must run and read well.
 - In "diff" scenes, "before" must exactly equal the code currently on screen.
 - SCREEN LOCK: IDE/browser narration must describe exactly what is on screen at that beat — captions and voice agree ("we type range one to five", "we click Downloads"). Do not narrate syntax symbols the learner cannot see; describe the action.
 - When the prompt says look up / docs / download: use authored browser scenes (search → serp → docs), never live web fetch.
@@ -276,6 +281,30 @@ export async function generateDSL(
         'an "ide" scene with at least one "run" step (realistic output) that teaches the core concept — prefer ide over bare code+terminal',
       );
     }
+    // Terminal soup: a concept lesson carried by terminal/cli cards doesn't
+    // teach the code — a bare terminal shows only output, and a wall of cli
+    // sessions buries the actual code the learner needs to read. When the topic
+    // is an editor/concept lesson (its recipe doesn't sanction cli), force the
+    // teaching back into an "ide" walkthrough and drop the redundant panels.
+    const recipe = matchRecipe(prompt);
+    const recipeAllowsCli = recipe.surfaces.some((s) => s === 'cli');
+    const terminalCount = dsl.scenes.filter((s) => s.type === 'terminal').length;
+    const cliCount = dsl.scenes.filter((s) => s.type === 'cli').length;
+    const ideCount = dsl.scenes.filter((s) => s.type === 'ide').length;
+    const termFamily = terminalCount + (recipeAllowsCli ? 0 : cliCount);
+    const convertingTerminals =
+      terminalCount >= 2 ||
+      (terminalCount >= 1 && ideCount === 0 && !dsl.scenes.some((s) => s.type === 'code')) ||
+      (!recipeAllowsCli && termFamily >= 2 && ideCount <= 1);
+    if (convertingTerminals) {
+      const panels = [
+        terminalCount ? `${terminalCount} "terminal"` : '',
+        !recipeAllowsCli && cliCount ? `${cliCount} "cli"` : '',
+      ].filter(Boolean).join(' and ');
+      missing.push(
+        `a full "ide" walkthrough that carries the teaching and REPLACES the ${panels} scene(s): move the code into an ide scene (type it in small chunks, "explain" each chunk, then "run" once to show the output), then DELETE those standalone terminal/cli scenes — this is a code-concept lesson, so the learner must SEE and read the code in an editor, not just watch commands scroll by. Keep at most one terminal, only right after the ide run`,
+      );
+    }
     if (!dsl.scenes.some((s) => s.type === 'quiz')) {
       missing.push(
         'exactly ONE "quiz" scene placed right after the most important concept (plausible distractors, teaching explanation, 2+ sentence narration framing the stakes)',
@@ -307,6 +336,9 @@ export async function generateDSL(
       );
     }
     if (missing.length) {
+      // A terminal-soup rewrite is EXPECTED to shrink the scene count (it deletes
+      // bare terminals/cli), so don't hold it to the "never lose a scene" rule the
+      // insert-missing repairs use — just require it still has real teaching beats.
       try {
         const repaired = await chatJSON(
           SYSTEM_PROMPT,
@@ -315,7 +347,11 @@ export async function generateDSL(
           opts,
         );
         const fixed = normalizeDSL(JSON.parse(extractJSON(repaired)));
-        if (fixed.scenes.length >= dsl.scenes.length) dsl = fixed;
+        const okCount = convertingTerminals
+          ? fixed.scenes.filter((s) => PRIMARY_CARD_TYPES.has(s.type)).length >= 2 &&
+            fixed.scenes.some((s) => s.type === 'ide')
+          : fixed.scenes.length >= dsl.scenes.length;
+        if (okCount) dsl = fixed;
       } catch {
         // ship without — the lesson still plays
       }
@@ -329,7 +365,7 @@ export async function generateDSL(
       const rich = normalizeDSL(JSON.parse(extractJSON(voiced)));
       // accept only if the pass did its one job: same scenes, more speech
       const wordsOf = (d: AnimationDSL) =>
-        d.scenes.reduce((a, s) => a + (s.narration || '').split(/\s+/).filter(Boolean).length, 0);
+        d.scenes.reduce((a, s) => a + spokenNarration(s).split(/\s+/).filter(Boolean).length, 0);
       if (
         rich.scenes.length === dsl.scenes.length &&
         rich.scenes.every((s, i) => s.type === dsl.scenes[i].type) &&

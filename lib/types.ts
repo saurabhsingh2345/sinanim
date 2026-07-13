@@ -8,7 +8,17 @@ export type ScenePosition = 'top' | 'center' | 'bottom' | 'top-center';
 export type SceneTheme = string | Record<string, unknown>;
 
 /** Transition into this scene from the previous primary card. */
-export type SceneTransition = 'none' | 'fade' | 'slide' | 'push' | 'zoom';
+export type SceneTransition =
+  | 'none'
+  | 'fade'
+  | 'slide'
+  | 'push'
+  | 'zoom'
+  | 'dissolve'
+  | 'wipe'
+  | 'iris'
+  | 'bars'
+  | 'sweep';
 
 export interface BaseScene {
   /** Seconds from the start of the video. */
@@ -167,6 +177,11 @@ export interface DiagramScene extends BaseScene {
   edges: DiagramEdge[];
   /** clean (default) or sketch (RoughJS-inspired hand-drawn strokes). */
   aesthetic?: 'clean' | 'sketch';
+  /** 'auto' → dagre lays the graph out (LLM can omit x/y); 'manual' → honor x/y.
+   *  Default: auto-detected (auto when coordinates are missing/degenerate). */
+  layout?: 'auto' | 'manual';
+  /** Rank direction for auto layout: 'LR' (default) or 'TB'. */
+  layoutDir?: 'LR' | 'TB';
 }
 
 export interface QuoteScene extends BaseScene {
@@ -301,8 +316,11 @@ export type IdeAction =
   /** Type `code` into `file` (typewriter). Reveals only the tail that changed
    *  from the file's previous snapshot, so successive types read as edits. */
   | { kind: 'type'; file: string; code: string; typingSpeed?: number }
-  /** Run `command` in the integrated terminal; `output` streams in beneath it. */
-  | { kind: 'run'; command: string; output?: string }
+  /** Run `command` in the integrated terminal; `output` streams in beneath it.
+   *  `creates` lists files the command scaffolds (e.g. `npm create vite`) — they
+   *  pop into the explorer tree when the command runs, so later steps can open
+   *  and edit them. */
+  | { kind: 'run'; command: string; output?: string; creates?: string[] }
   /** Glow lines `startLine`..`endLine` of the active file. */
   | { kind: 'highlight'; file?: string; startLine: number; endLine: number }
   /** Teach without changing the workspace: hold everything, glow lines when
@@ -400,10 +418,15 @@ export interface BrowserScene extends BaseScene {
   pageTheme?: 'light' | 'dark';
   /** @deprecated Use pageTheme. Kept for LLM/scaffold compat. */
   theme?: 'light' | 'dark' | SceneTheme;
-  /** Page blocks, revealed one-by-one across the (narrated) duration. */
+  /** Page blocks, revealed one-by-one across the (narrated) duration. Used as a
+   *  fallback mockup when no real screenshot is available for `url`. */
   blocks: BrowserBlock[];
   /** Index of a block (button) the cursor clicks near the end (optional). */
   clickBlock?: number;
+  /** Path/data-URL of a REAL screenshot of `url`, captured by the browser-shot
+   *  pre-pass (lib/render/capture-page.ts). Never authored — when present the
+   *  renderer composites the live page instead of drawing mock blocks. */
+  shot?: string;
 }
 
 // ── Real browser recording (from scripts/capture-browser.mts) ───────────────────
@@ -559,5 +582,7 @@ export interface AnimationDSL {
   captions?: boolean;
   /** Play keystroke / UI sound effects (default true). */
   sfx?: boolean;
+  /** Play the soft ambient music bed under the lesson (default true). */
+  music?: boolean;
   scenes: Scene[];
 }

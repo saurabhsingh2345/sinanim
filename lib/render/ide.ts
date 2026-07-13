@@ -6,16 +6,31 @@ import { IdeScene } from '../types';
 import { Tok } from '../highlight';
 import { inferLang } from '../dsl';
 import { clamp, easeInOut, easeOutCubic, lerp } from '../utils';
-import { typedRevealIndex, commonPrefixLen } from '../timing';
+import { typedReveal } from '../timing';
 import { FocusTarget } from '../camera';
 import { envelope } from '../motion';
 import { ansiToLines, hasAnsi } from '../ansi';
 import type { Prepared } from '../renderer';
 import {
   C, IDE, ACTIVE_PACK, MONO, SANS, Rect,
-  roundRect, withAlpha, cardAlpha, fileColor, plainTokens, revealTokenLines,
+  roundRect, withAlpha, cardAlpha, fileColor, plainTokens, revealTokenLinesByLine,
   drawMouseCursor, termLineColor, drawTemplateCaption,
 } from './shared';
+
+/** Scroll offset (lines) that keeps `caretLine` comfortably in view. */
+function codeScroll(total: number, caretLine: number, maxRows: number): number {
+  if (total <= maxRows) return 0;
+  return clamp(caretLine - maxRows + 3, 0, total - maxRows);
+}
+
+/** Clamp a highlight/explain line range to the file's real lines so the glow
+ *  never lands on empty rows past end-of-file. */
+function clampHi(code: string, file: string, start?: number, end?: number): { file: string; start: number; end: number } {
+  const n = Math.max(1, (code || '').split('\n').length);
+  const s = Math.max(1, Math.min(Math.round(start ?? 1), n));
+  const e = Math.max(s, Math.min(Math.round(end ?? s), n));
+  return { file, start: s, end: e };
+}
 
 // ── IDE card: a full VS Code–style workspace that types + runs ─────────────────
 // One full-frame scene that plays its `steps` across the (narration-stretched)
@@ -77,11 +92,26 @@ export function ideStepTimes(scene: IdeScene): number[] {
   // (computed by the narration pipeline). The weights model is the fallback.
   if (scene.stepNarrationTimes && scene.stepNarrationTimes.length === scene.steps.length) {
     const cap = Math.max(window - 0.2, 0.2);
-    return scene.stepNarrationTimes.map((t) => Math.min(t, cap));
+    const times = scene.stepNarrationTimes.slice();
+    // If the tail runs past the window, fan the late steps out just under the cap
+    // instead of stacking every one of them on the exact same final frame.
+    for (let i = times.length - 1; i >= 0; i--) {
+      const ceil = cap - (times.length - 1 - i) * 0.12;
+      if (times[i] > ceil) times[i] = Math.max(0, ceil);
+    }
+    for (let i = 1; i < times.length; i++) if (times[i] < times[i - 1] + 0.05) times[i] = times[i - 1] + 0.05;
+    return times;
   }
   const usable = Math.max(window - 0.5, 0.6);
-  const weight = (st: IdeScene['steps'][number]) =>
-    st.weight ?? (st.action.kind === 'type' ? 1.7 : st.action.kind === 'run' ? 1.5 : 0.8);
+  // Fallback (no measured narration times): weight each step by how much it SAYS
+  // (≈ speech time) so a talky step holds longer, plus a floor per action kind —
+  // this keeps even the estimate roughly voice-aligned instead of uniform.
+  const weight = (st: IdeScene['steps'][number]) => {
+    if (st.weight) return st.weight;
+    const spoken = st.narration ? st.narration.trim().length / 42 : 0;
+    const base = st.action.kind === 'type' ? 1.7 : st.action.kind === 'run' ? 1.5 : 0.8;
+    return Math.max(base, spoken);
+  };
   const sum = scene.steps.reduce((a, s) => a + weight(s), 0) || 1;
   let t = 0.25;
   return scene.steps.map((s) => { const at = t; t += (weight(s) / sum) * usable; return at; });
@@ -106,13 +136,12 @@ export function ideTypedCount(scene: IdeScene, time: number): number {
     if (act.kind === 'type') {
       const prev = buffers.get(act.file) || '';
       const full = act.code;
-      const cp = commonPrefixLen(prev, full);
-      buffers.set(act.file, full);
       const speed = act.typingSpeed ?? 26;
-      const reveal = j < k
-        ? full.length
-        : typedRevealIndex(prev, full, stepLocal, stepDur, speed);
-      count += Math.max(0, reveal - cp);
+      const rv = j < k
+        ? typedReveal(prev, full, 1e9, 0.001, speed)
+        : typedReveal(prev, full, stepLocal, stepDur, speed);
+      count += j < k ? rv.totalNew : rv.typedNew;
+      buffers.set(act.file, full);
     } else if (act.kind === 'create') {
       const nm = (act.file.split('/').pop() || '').length;
       const cr = j < k ? nm : Math.round(nm * clamp(stepLocal / Math.max(stepDur * 0.55, 0.2), 0, 1));
@@ -142,9 +171,10 @@ export function ideTypedCharAt(scene: IdeScene, time: number): string {
     }
     const prev = buffers.get(st.action.file) || '';
     const full = st.action.code;
-    const reveal = typedRevealIndex(prev, full, stepLocal, stepDur, st.action.typingSpeed ?? 26);
-    if (reveal <= 0) return '';
-    return full[reveal - 1] || '';
+    const rv = typedReveal(prev, full, stepLocal, stepDur, st.action.typingSpeed ?? 26);
+    if (rv.typedNew <= 0) return '';
+    const line = full.split('\n')[rv.caretLine] || '';
+    return line[rv.caretCol - 1] || line[line.length - 1] || '';
   }
   if (st.action.kind === 'create') {
     const name = st.action.file.split('/').pop() || '';
@@ -215,7 +245,7 @@ interface IdeState {
   k: number; rawP: number; p: number;
   opened: string[]; active: string | null;
   buffers: Map<string, string>;
-  typing: { file: string; reveal: number; caretLine: number } | null;
+  typing: { file: string; perLine: number[]; caretLine: number; caretCol: number; typedNew: number } | null;
   creating: { file: string; reveal: number } | null;
   term: { command: string; output: string; cmdP: number; outP: number }[];
   hi: { file: string; start: number; end: number } | null;
@@ -273,23 +303,27 @@ function ideStateAt(scene: IdeScene, time: number): IdeState {
     } else if (act.kind === 'type') {
       see(act.file, j); openTab(act.file);
       const prev = buffers.get(act.file) || ''; const full = act.code;
-      buffers.set(act.file, full);
       if (!done) {
-        const reveal = typedRevealIndex(prev, full, stepLocal, stepDur, act.typingSpeed ?? 26);
-        const caretLine = full.slice(0, reveal).split('\n').length - 1;
-        typing = { file: act.file, reveal, caretLine }; hi = null;
+        const rv = typedReveal(prev, full, stepLocal, stepDur, act.typingSpeed ?? 26);
+        typing = { file: act.file, perLine: rv.perLine, caretLine: rv.caretLine, caretCol: rv.caretCol, typedNew: rv.typedNew };
+        hi = null;
       }
+      buffers.set(act.file, full);
     } else if (act.kind === 'run') {
       const p = done ? 1 : pE;
       term.push({ command: act.command, output: act.output || '', cmdP: done ? 1 : clamp(p / 0.3, 0, 1), outP: done ? 1 : clamp((p - 0.35) / 0.6, 0, 1) });
+      // files scaffolded by the command pop into the explorer as it runs
+      if (act.creates && (done || pE > 0.25)) {
+        for (const f of act.creates) { see(f, j); if (!buffers.has(f)) buffers.set(f, ''); }
+      }
     } else if (act.kind === 'explain') {
       // teach in place: nothing in the workspace changes; glow lines when given
       if (!done && act.startLine != null) {
         const f = act.file || active;
-        if (f) { see(f, j); openTab(f); hi = { file: f, start: act.startLine, end: act.endLine ?? act.startLine }; }
+        if (f) { see(f, j); openTab(f); hi = clampHi(buffers.get(f) || '', f, act.startLine, act.endLine ?? act.startLine); }
       }
     } else {
-      const f = act.file || active; if (f) { see(f, j); openTab(f); hi = { file: f, start: act.startLine, end: act.endLine }; }
+      const f = act.file || active; if (f) { see(f, j); openTab(f); hi = clampHi(buffers.get(f) || '', f, act.startLine, act.endLine); }
     }
   }
   return { k, rawP, p: pE, opened, active, buffers, typing, creating, term, hi, caption, visible: Array.from(visibleSet), firstSeen, actionKind, overlay, clickTarget };
@@ -310,27 +344,31 @@ function ideFocusRaw(scene: IdeScene, time: number, W: number, H: number): { x: 
   let x = W / 2, y = H / 2, zoom = 1.05;
   const maxRows = Math.max(1, Math.floor((codeH - 12) / L.lh));
   if (S.actionKind === 'type' && S.typing) {
-    const typed = (S.buffers.get(S.typing.file) || '').slice(0, S.typing.reveal);
-    const lines = typed.split('\n');
-    const total = lines.length;
-    const scroll = Math.max(0, total - maxRows);
+    const total = (S.buffers.get(S.typing.file) || '').split('\n').length;
+    const scroll = codeScroll(total, S.typing.caretLine, maxRows);
     const row = clamp(S.typing.caretLine - scroll, 0, maxRows - 1);
-    const col = (lines[lines.length - 1] || '').length;
+    // Follow the caret ROW (slow, one line at a time), but anchor X on the code
+    // column — never chase the caret column, or the frame jitters left/right on
+    // every keystroke and snaps back on each newline. Keep the zoom gentle so a
+    // one-line vertical step barely moves the frame.
     y = L.codeTop + 8 + row * L.lh + L.lh / 2;
-    x = L.codeX + Math.min(col, 48) * L.charW;
-    zoom = 1.22;
+    x = editorMidX * 0.9;
+    zoom = 1.1;
   } else if (S.actionKind === 'run') {
-    y = L.codeTop + codeH + termH / 2; x = editorMidX; zoom = 1.18;
+    y = L.codeTop + codeH + termH / 2; x = editorMidX; zoom = 1.1;
   } else if ((S.actionKind === 'highlight' || S.actionKind === 'explain') && S.hi) {
-    const mid = (S.hi.start + S.hi.end) / 2 - 1;
-    y = L.codeTop + 8 + clamp(mid, 0, maxRows - 1) * L.lh + L.lh / 2; x = editorMidX * 0.92; zoom = 1.28;
+    const total = (S.buffers.get(S.hi.file) || '').split('\n').length;
+    const mid = Math.round((S.hi.start + S.hi.end) / 2) - 1;
+    const scroll = codeScroll(total, mid, maxRows);
+    const row = clamp(mid - scroll, 0, maxRows - 1);
+    y = L.codeTop + 8 + row * L.lh + L.lh / 2; x = editorMidX * 0.92; zoom = 1.14;
   } else if (S.actionKind === 'explain' && S.term.length > 0) {
     // explaining the run's output: settle on the terminal while the voice talks
-    y = L.codeTop + codeH + termH / 2; x = editorMidX; zoom = 1.2;
+    y = L.codeTop + codeH + termH / 2; x = editorMidX; zoom = 1.12;
   } else if (S.actionKind === 'explain') {
-    x = editorMidX; y = L.codeTop + codeH * 0.45; zoom = 1.12;
+    x = editorMidX; y = L.codeTop + codeH * 0.45; zoom = 1.08;
   } else if (S.actionKind === 'open' || S.actionKind === 'create') {
-    x = L.exX + L.EXw / 2; y = L.cy + codeH / 2; zoom = 1.1;
+    x = L.exX + L.EXw / 2; y = L.cy + codeH / 2; zoom = 1.08;
   }
   return { x, y, zoom };
 }
@@ -343,14 +381,14 @@ export function ideFocus(scene: IdeScene, time: number, W: number, H: number): F
   let { x, y, zoom } = cur;
   if (k > 0) {
     const tIn = local - times[k];
-    const TRANS = 0.55;
+    const TRANS = 0.9; // slow, deliberate glide between steps (was 0.55, felt snappy)
     if (tIn < TRANS) {
       const prev = ideFocusRaw(scene, scene.startTime + times[k] - 0.001, W, H);
       const b = easeInOut(clamp(tIn / TRANS, 0, 1));
       x = lerp(prev.x, cur.x, b); y = lerp(prev.y, cur.y, b); zoom = lerp(prev.zoom, cur.zoom, b);
     }
   }
-  const strength = envelope(time, scene.startTime, scene.startTime + scene.duration, 0.55, 0.5) * 0.92;
+  const strength = envelope(time, scene.startTime, scene.startTime + scene.duration, 0.85, 0.75) * 0.9;
   if (strength <= 0.01) return null;
   return { x, y, zoom, strength };
 }
@@ -513,16 +551,79 @@ export function drawIdeCard(ctx: CanvasRenderingContext2D, prep: Prepared, scene
     const codeAreaTop = L.edBodyY + BC;
     const codeAreaH = codeH - BC;
     const codeX = edX + L.gutterW + 14;
-    const revealLen = S.typing && S.typing.file === S.active ? S.typing.reveal : Number.MAX_SAFE_INTEGER;
-    const shown = revealTokenLines(toks, revealLen);
+    const isTypingHere = !!(S.typing && S.typing.file === S.active);
+    const shown = isTypingHere ? revealTokenLinesByLine(toks, S.typing!.perLine) : toks;
+    const totalLines = toks.length;
+    const caretLine = isTypingHere ? S.typing!.caretLine : totalLines - 1;
+    // Lines to draw: up to the caret, plus any already-present ("kept") lines
+    // below it. Not-yet-typed appended lines stay hidden so nothing pops in early.
+    let lastLine = caretLine;
+    if (isTypingHere) {
+      for (let i = totalLines - 1; i > caretLine; i--) {
+        if (S.typing!.perLine[i] >= Number.MAX_SAFE_INTEGER) { lastLine = i; break; }
+      }
+    }
+    const shownCount = isTypingHere ? lastLine + 1 : totalLines;
+
+    // Soft-wrap: a logical line wider than the editor becomes several hanging-
+    // indented VISUAL rows, so code is never cut off at the right edge. All
+    // scrolling/positioning below happens in visual-row space.
+    const availCols = Math.max(8, Math.floor((edW - MM - L.gutterW - 30) / charW));
+    type VisRow = { li: number; startCol: number; indentCols: number; toks: Tok[]; first: boolean };
+    const visRows: VisRow[] = [];
+    const firstVisOf: number[] = new Array(Math.max(shownCount, 1)).fill(0);
+    for (let li = 0; li < shownCount; li++) {
+      firstVisOf[li] = visRows.length;
+      const lineToks = shown[li] || [];
+      const lineLen = lineToks.reduce((a, t) => a + t.text.length, 0);
+      if (lineLen <= availCols) { visRows.push({ li, startCol: 0, indentCols: 0, toks: lineToks, first: true }); continue; }
+      const full = lineToks.map((t) => t.text).join('');
+      const lead = full.match(/^[ \t]*/)?.[0].length || 0;
+      const hang = Math.min(lead + 2, Math.floor(availCols * 0.4));
+      const chars: { ch: string; color: string }[] = [];
+      for (const t of lineToks) for (const ch of t.text) chars.push({ ch, color: t.color });
+      let ci = 0, first = true;
+      while (ci < chars.length) {
+        const indent = first ? 0 : hang;
+        const width = Math.max(4, availCols - indent);
+        let end = Math.min(ci + width, chars.length);
+        if (end < chars.length) {
+          for (let k = end; k > ci + Math.floor(width * 0.5); k--) { if (chars[k - 1].ch === ' ') { end = k; break; } }
+        }
+        const segToks: Tok[] = [];
+        for (let k = ci; k < end; k++) {
+          const c = chars[k];
+          const last = segToks[segToks.length - 1];
+          if (last && last.color === c.color) last.text += c.ch; else segToks.push({ text: c.ch, color: c.color });
+        }
+        visRows.push({ li, startCol: ci, indentCols: indent, toks: segToks, first });
+        ci = end; first = false;
+      }
+    }
+    const totalVis = visRows.length;
+
+    // caret's visual row = the last visual row of the caret's logical line
+    const caretCol = isTypingHere ? (shown[caretLine]?.reduce((a, t) => a + t.text.length, 0) ?? 0) : 0;
+    let caretVis = totalVis - 1;
+    if (isTypingHere) {
+      for (let v = 0; v < totalVis; v++) if (visRows[v].li === caretLine && visRows[v].startCol <= caretCol) caretVis = v;
+    }
     const maxRows = Math.max(1, Math.floor((codeAreaH - 12) / lh));
-    const scroll = Math.max(0, shown.length - maxRows);
+    const lastLog = Math.max(0, shownCount - 1);
+    const scroll = isTypingHere
+      ? codeScroll(totalVis, caretVis, maxRows)
+      : (S.hi && S.hi.file === S.active)
+        ? codeScroll(totalVis, firstVisOf[clamp(Math.round((S.hi.start + S.hi.end) / 2) - 1, 0, lastLog)], maxRows)
+        : Math.max(0, totalVis - maxRows);
     let caret: { x: number; y: number; frag: string } | null = null;
 
     ctx.save();
     ctx.beginPath(); ctx.rect(edX, codeAreaTop, edW - MM, codeAreaH); ctx.clip();
     if (S.hi && S.hi.file === S.active) {
-      const s0 = S.hi.start - 1 - scroll, e0 = S.hi.end - 1 - scroll;
+      const vStart = firstVisOf[clamp(S.hi.start - 1, 0, lastLog)];
+      const heLog = clamp(S.hi.end - 1, 0, lastLog);
+      const vEnd = (heLog + 1 < shownCount ? firstVisOf[heLog + 1] : totalVis) - 1;
+      const s0 = vStart - scroll, e0 = vEnd - scroll;
       if (e0 >= 0 && s0 < maxRows) {
         const yTop = codeAreaTop + 8 + Math.max(0, s0) * lh;
         const yH = (Math.min(e0, maxRows - 1) - Math.max(0, s0) + 1) * lh;
@@ -531,35 +632,44 @@ export function drawIdeCard(ctx: CanvasRenderingContext2D, prep: Prepared, scene
       }
     }
     for (let r = 0; r < maxRows; r++) {
-      const li = r + scroll; if (li >= shown.length) break;
+      const v = r + scroll; if (v >= totalVis) break;
+      const vr = visRows[v];
+      const li = vr.li;
       const y = codeAreaTop + 8 + fs + r * lh;
-      const lineText = shown[li].map((t) => t.text).join('');
-      // current line highlight
-      if (S.typing && S.typing.file === S.active && li === shown.length - 1) {
+      const lineText = vr.toks.map((t) => t.text).join('');
+      // current line highlight spans every visual row of the caret's logical line
+      if (isTypingHere && li === caretLine) {
         ctx.fillStyle = 'rgba(255,255,255,0.04)'; ctx.fillRect(edX, y - fs - 2, edW - MM, lh);
       }
-      // indent guides
-      const indent = (lineText.match(/^[ \t]*/)?.[0].length || 0);
-      const spaces = lineText.startsWith('\t') ? indent * 2 : indent;
-      for (let g = 2; g <= spaces; g += 2) {
-        ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
-        const gx = codeX + g * charW;
-        ctx.beginPath(); ctx.moveTo(gx, y - fs); ctx.lineTo(gx, y + 4); ctx.stroke();
-      }
-      // git gutter: new lines green, changed lines blue
-      const git = li >= initialCount ? '#3fb950' : (lineText.trim() && lineText !== initialLines[li] ? '#58a6ff' : null);
-      if (git) { ctx.fillStyle = git; ctx.fillRect(edX + L.gutterW - 3, y - fs, 2.5, fs + 3); }
       ctx.font = `${fs}px ${MONO}`;
-      ctx.fillStyle = IDE.dim; ctx.textAlign = 'right';
-      ctx.fillText(String(li + 1), edX + L.gutterW - 10, y); ctx.textAlign = 'left';
-      let x = codeX;
-      for (const t of shown[li]) { ctx.fillStyle = t.color; ctx.fillText(t.text, x, y); x += t.text.length * charW; }
-      if (S.typing && S.typing.file === S.active && li === shown.length - 1) {
-        // blinking caret
-        if (Math.floor(time * 1.8) % 2 === 0) {
-          ctx.fillStyle = C.accent; ctx.fillRect(x + 1, y - fs, Math.max(2, charW * 0.5), fs + 3);
+      if (vr.first) {
+        // indent guides
+        const indent = (lineText.match(/^[ \t]*/)?.[0].length || 0);
+        const spaces = lineText.startsWith('\t') ? indent * 2 : indent;
+        for (let g = 2; g <= spaces; g += 2) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
+          const gx = codeX + g * charW;
+          ctx.beginPath(); ctx.moveTo(gx, y - fs); ctx.lineTo(gx, y + 4); ctx.stroke();
         }
-        caret = { x, y, frag: (lineText.match(/[A-Za-z_][A-Za-z0-9_]*$/) || [''])[0] };
+        // git gutter: new lines green, changed lines blue
+        const fullLineText = (shown[li] || []).map((t) => t.text).join('');
+        const git = li >= initialCount ? '#3fb950' : (fullLineText.trim() && fullLineText !== initialLines[li] ? '#58a6ff' : null);
+        if (git) { ctx.fillStyle = git; ctx.fillRect(edX + L.gutterW - 3, y - fs, 2.5, fs + 3); }
+        ctx.fillStyle = IDE.dim; ctx.textAlign = 'right';
+        ctx.fillText(String(li + 1), edX + L.gutterW - 10, y); ctx.textAlign = 'left';
+      } else {
+        // wrapped continuation: a subtle marker where the line number would be
+        ctx.fillStyle = withAlpha(IDE.dim, 0.5); ctx.textAlign = 'right';
+        ctx.fillText('⋯', edX + L.gutterW - 10, y); ctx.textAlign = 'left';
+      }
+      let x = codeX + vr.indentCols * charW;
+      for (const t of vr.toks) { ctx.fillStyle = t.color; ctx.fillText(t.text, x, y); x += t.text.length * charW; }
+      if (isTypingHere && li === caretLine && v === caretVis) {
+        const cx = codeX + vr.indentCols * charW + (caretCol - vr.startCol) * charW;
+        if (Math.floor(time * 1.8) % 2 === 0) {
+          ctx.fillStyle = C.accent; ctx.fillRect(cx + 1, y - fs, Math.max(2, charW * 0.5), fs + 3);
+        }
+        caret = { x: cx, y, frag: (lineText.match(/[A-Za-z_][A-Za-z0-9_]*$/) || [''])[0] };
       }
     }
     ctx.restore();
@@ -569,14 +679,14 @@ export function drawIdeCard(ctx: CanvasRenderingContext2D, prep: Prepared, scene
     ctx.save();
     ctx.beginPath(); ctx.rect(mmX, codeAreaTop, MM, codeAreaH); ctx.clip();
     ctx.fillStyle = 'rgba(255,255,255,0.018)'; ctx.fillRect(mmX, codeAreaTop, MM, codeAreaH);
-    const mmLineH = clamp((codeAreaH - 12) / Math.max(shown.length, 1) - 1, 1.5, 3.2);
-    for (let li = 0; li < shown.length; li++) {
+    const mmLineH = clamp((codeAreaH - 12) / Math.max(shownCount, 1) - 1, 1.5, 3.2);
+    for (let li = 0; li < shownCount; li++) {
       const yy = codeAreaTop + 6 + li * (mmLineH + 1);
       if (yy > codeAreaTop + codeAreaH - mmLineH) break;
       let xx = mmX + 8;
       for (const t of shown[li]) { if (!t.text.trim()) { xx += t.text.length * 1.2; continue; } const w = Math.min(t.text.length * 1.3, mmX + MM - 10 - xx); if (w > 0) { ctx.fillStyle = withAlpha(t.color, 0.55); ctx.fillRect(xx, yy, w, mmLineH); xx += w + 1.5; } }
     }
-    if (shown.length > maxRows) { const vpY = codeAreaTop + 6 + scroll * (mmLineH + 1); ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(mmX, vpY, MM, maxRows * (mmLineH + 1)); }
+    if (shownCount > maxRows) { const vpY = codeAreaTop + 6 + scroll * (mmLineH + 1); ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(mmX, vpY, MM, maxRows * (mmLineH + 1)); }
     ctx.fillStyle = IDE.line; ctx.fillRect(mmX, codeAreaTop, 1, codeAreaH);
     ctx.restore();
 
@@ -724,8 +834,7 @@ export function drawIdeCard(ctx: CanvasRenderingContext2D, prep: Prepared, scene
   let ln = 1, col = 1;
   if (S.typing && S.typing.file === S.active) {
     ln = S.typing.caretLine + 1;
-    const line = (S.buffers.get(S.active) || '').slice(0, S.typing.reveal).split('\n').pop() || '';
-    col = line.length + 1;
+    col = S.typing.caretCol + 1;
   }
   ctx.font = `500 ${Math.round(SB * 0.38)}px ${SANS}`;
   ctx.fillText(`Ln ${ln}, Col ${col}   ${alang}   UTF-8   LF   Spaces: 2`, win.x + win.w - 18, sbY + SB / 2 + 1);

@@ -171,7 +171,10 @@ export async function recordVideoFast(
   const collector = collectAudioEvents(prep, engine, narration);
   const events =
     dsl.sfx === false ? collector.events.filter((e) => e.kind === 'voice') : collector.events;
-  const mix = await renderSfxMix(events, dsl.duration, audioCfg.sampleRate);
+  const mix = await renderSfxMix(events, dsl.duration, audioCfg.sampleRate, {
+    bed: engine.sampleBuffers.bed,
+    bedGain: dsl.music === false ? 0 : 0.12,
+  });
 
   const muxer = new Muxer({
     target: new ArrayBufferTarget(),

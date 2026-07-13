@@ -7,6 +7,7 @@
 // the LLM for a *targeted* rewrite instead of regenerating the whole lesson.
 
 import { AnimationDSL } from './types';
+import { spokenNarration } from './step-sync';
 
 export interface ScriptIssue {
   sceneIndex: number;
@@ -59,7 +60,7 @@ export function lintScript(dsl: AnimationDSL): ScriptIssue[] {
   const issues: ScriptIssue[] = [];
 
   dsl.scenes.forEach((scene, sceneIndex) => {
-    const n = scene.narration;
+    const n = spokenNarration(scene);
     if (!n) return;
     const sentences = sentencesOf(n);
 
@@ -106,11 +107,12 @@ export function lintScript(dsl: AnimationDSL): ScriptIssue[] {
   });
 
   // trailer-style opener ("In this video we will learn...") on the first narrated scene
-  const first = dsl.scenes.find((s) => s.narration);
-  if (first?.narration && /^(in this|today (we|I)|welcome|hello|hi\b)/i.test(first.narration.trim())) {
+  const first = dsl.scenes.find((s) => spokenNarration(s));
+  const firstText = first ? spokenNarration(first) : '';
+  if (firstText && /^(in this|today (we|I)|welcome|hello|hi\b)/i.test(firstText.trim())) {
     issues.push({
-      sceneIndex: dsl.scenes.indexOf(first), kind: 'opener',
-      excerpt: sentencesOf(first.narration)[0] || '',
+      sceneIndex: dsl.scenes.indexOf(first!), kind: 'opener',
+      excerpt: sentencesOf(firstText)[0] || '',
       message: 'opens with a greeting/announcement — open with the HOOK instead (a concrete problem, a surprising failure, a question)',
     });
   }

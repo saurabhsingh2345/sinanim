@@ -195,4 +195,116 @@ writeWav('enter.wav', keySound(88, 330, 0.05, 0.18, 300));
   writeWav('buzz.wav', out);
 }
 
+// ── extended palette (overhaul) ─────────────────────────────────────────────────
+{
+  // hover: barely-there high tick for cursor-over-target
+  const out = seconds(0.05);
+  mix(out, sine(2400, 0.03, 0.004), 0.4);
+  mix(out, sine(3200, 0.02, 0.003), 0.2);
+  normalize(out, 0.28);
+  writeWav('hover.wav', out);
+}
+
+{
+  // backspace: a duller, lower thock than a normal key — reads as "delete"
+  const b = keySound(96, 300, 0.045, 0.14, 700);
+  normalize(b, 0.5);
+  writeWav('back.wav', b);
+}
+
+{
+  // swish: quick bright transition sweep, shorter and airier than whoosh
+  const rand = mulberry32(77);
+  const dur = 0.26;
+  const n = noise(dur, rand);
+  const swept = onePoleLP(n, (i) => {
+    const t = i / SR / dur;
+    return 600 + 4200 * Math.sin(Math.PI * Math.min(t, 1)) ** 2;
+  });
+  const out = new Float64Array(swept);
+  for (let i = 0; i < out.length; i++) {
+    const t = i / SR / dur;
+    out[i] *= Math.sin(Math.PI * Math.min(t, 1)) ** 1.3;
+  }
+  normalize(out, 0.34);
+  writeWav('swish.wav', out);
+}
+
+{
+  // tick: tiny mechanical counter blip for count-ups / number reveals
+  const out = seconds(0.04);
+  mix(out, sine(1600, 0.02, 0.004), 0.5);
+  mix(out, sine(880, 0.03, 0.006), 0.25);
+  normalize(out, 0.4);
+  writeWav('tick.wav', out);
+}
+
+{
+  // send: confident upward "vip" + soft body — API submit / form send
+  const out = seconds(0.22);
+  for (let i = 0; i < out.length; i++) {
+    const t = i / SR;
+    const f = 420 + 520 * (t / 0.22);
+    out[i] = Math.sin(2 * Math.PI * f * t) * Math.exp(-t / 0.06) * 0.7;
+  }
+  mix(out, sine(180, 0.1, 0.03), 0.3);
+  normalize(out, 0.5);
+  writeWav('send.wav', out);
+}
+
+{
+  // ting: single soft bell — "output landed", response received
+  const out = seconds(0.5);
+  mix(out, sine(1244.5, 0.42, 0.16), 0.6); // D#6
+  mix(out, sine(2489, 0.4, 0.09), 0.12);
+  normalize(out, 0.42);
+  writeWav('ting.wav', out);
+}
+
+{
+  // success: rising 3-note arpeggio fanfare (C6 E6 G6) — challenge passed
+  const out = seconds(1.0);
+  const notes = [1046.5, 1318.5, 1568, 2093];
+  notes.forEach((f, k) => {
+    mix(out, sine(f, 0.55, 0.2), 0.5, k * 0.09);
+    mix(out, sine(f * 2, 0.5, 0.12), 0.1, k * 0.09);
+  });
+  normalize(out, 0.5);
+  writeWav('success.wav', out);
+}
+
+{
+  // bed: slow, soft evolving ambient pad — a warm underscore that ducks under the
+  // voice. Long enough (18s) that looping is unobtrusive; deliberately quiet.
+  const dur = 18;
+  const out = seconds(dur);
+  // a stack of detuned low sines forming a suspended chord, with slow LFO drift
+  const roots = [65.41, 98.0, 130.81, 164.81, 196.0]; // C2 G2 C3 E3 G3
+  const rand = mulberry32(909);
+  for (const base of roots) {
+    for (const det of [0.997, 1.0, 1.004]) {
+      const f = base * det;
+      const ph = rand() * Math.PI * 2;
+      const lfoRate = 0.03 + rand() * 0.05;
+      const lfoPh = rand() * Math.PI * 2;
+      for (let i = 0; i < out.length; i++) {
+        const t = i / SR;
+        const lfo = 0.5 + 0.5 * Math.sin(2 * Math.PI * lfoRate * t + lfoPh);
+        out[i] += Math.sin(2 * Math.PI * f * t + ph) * lfo;
+      }
+    }
+  }
+  // soften: gentle lowpass + slow fade in/out at the seams for clean looping
+  const soft = onePoleLP(out, () => 900);
+  for (let i = 0; i < out.length; i++) out[i] = soft[i];
+  const fade = Math.floor(1.5 * SR);
+  for (let i = 0; i < fade; i++) {
+    const g = i / fade;
+    out[i] *= g;
+    out[out.length - 1 - i] *= g;
+  }
+  normalize(out, 0.5);
+  writeWav('bed.wav', out);
+}
+
 console.log('done.');

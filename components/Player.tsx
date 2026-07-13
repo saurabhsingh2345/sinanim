@@ -321,6 +321,7 @@ export function Player({
     setPlaying(false);
     cancelAnimationFrame(rafRef.current);
     engineRef.current?.stopNarration();
+    engineRef.current?.stopBed();
     const total = prepRef.current?.dsl.duration || 1;
     onProgress?.(clamp(timeRef.current / total, 0, 1));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -403,6 +404,8 @@ export function Player({
       setChallenge(null);
       setScore({ correct: 0, total: 0 });
     }
+    // soft ambient bed under the lesson (ducks under narration automatically)
+    if (dsl.music !== false && dsl.sfx !== false) engineRef.current?.startBed(0.12);
     conductorRef.current!.rate = speedRef.current;
     conductorRef.current?.reset(timeRef.current);
     playingRef.current = true;
