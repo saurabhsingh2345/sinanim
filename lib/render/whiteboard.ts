@@ -313,6 +313,31 @@ function drawForceArrow(ctx: CanvasRenderingContext2D, px: number, py: number, f
   ctx.restore();
 }
 
+// a VALUE cell: a rounded box with text inside (array cell / variable / frame),
+// drawn on as p goes 0→1. Sized to the text. Returns the pen tip.
+function drawCell(ctx: CanvasRenderingContext2D, text: string, px: number, py: number, scale: number, p: number, rs: number, ink: string): Pt | null {
+  const fs = 46 * scale * rs;
+  ctx.save();
+  ctx.font = `700 ${fs}px ${HAND}`;
+  const tw = ctx.measureText(text).width;
+  const halfW = Math.max(fs * 0.9, tw / 2 + fs * 0.5);
+  const halfH = fs * 0.85;
+  // rounded rect as a polyline, stroked-on
+  const x0 = px - halfW, y0 = py - halfH, x1 = px + halfW, y1 = py + halfH, r = Math.min(14 * rs, halfH * 0.5);
+  const rect: Pt[] = [
+    [x0 + r, y0], [x1 - r, y0], [x1, y0 + r], [x1, y1 - r], [x1 - r, y1], [x0 + r, y1], [x0, y1 - r], [x0, y0 + r], [x0 + r, y0],
+  ];
+  const tip = strokePathsReveal(ctx, [rect], p, { color: ink, width: 3.4 * rs, shadow: true, taper: true });
+  if (p > 0.55) { // ink the value in once the box is mostly drawn
+    ctx.globalAlpha *= clamp((p - 0.55) / 0.45, 0, 1);
+    ctx.fillStyle = ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(15,20,30,0.10)'; ctx.shadowBlur = 3 * rs; ctx.shadowOffsetY = 1.5 * rs;
+    ctx.fillText(text, px, py + fs * 0.04);
+  }
+  ctx.restore();
+  return tip;
+}
+
 // ── story mode: persistent actors that MOVE, beat by beat ─────────────────────────
 function drawStoryboard(ctx: CanvasRenderingContext2D, prep: Prepared, scene: WhiteboardScene, time: number, W: number, H: number) {
   const rs = H / 1080;
@@ -343,7 +368,10 @@ function drawStoryboard(ctx: CanvasRenderingContext2D, prep: Prepared, scene: Wh
       if (L > 1.2) drawMotionLines(ctx, px, py, vx / L, vy / L, size, rs, b.ink);
     }
     const parsed = track.icon ? svgs?.get(track.icon) : undefined;
-    if (parsed) {
+    if (track.box != null && track.box !== '') {
+      const tip = drawCell(ctx, track.box, px, py, s.scale, s.drawP, rs, b.ink);
+      if (s.drawP < 1) penTip = tip;
+    } else if (parsed) {
       const tip = drawSvgObject(ctx, parsed, { x: px, y: py, size }, s.drawP, { color: b.ink, width: 4.0 * rs, shadow: true, taper: true });
       if (s.drawP < 1) penTip = tip;
     } else {

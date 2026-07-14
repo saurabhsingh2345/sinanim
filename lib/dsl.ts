@@ -860,6 +860,7 @@ export function normalizeDSL(raw: any): AnimationDSL {
         const actors = Array.isArray(s.actors) ? s.actors.slice(0, 12).map((a: any) => ({
           id: id(a?.id),
           icon: a?.icon ? String(a.icon) : undefined,
+          box: a?.box != null && a.box !== '' ? String(a.box) : undefined,
           label: a?.label ? String(a.label) : undefined,
           at: pair(a?.at, 0.5, 0.5),
           scale: a?.scale ? clamp(Number(a.scale) || 1, 0.1, 4) : undefined,

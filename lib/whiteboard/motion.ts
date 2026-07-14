@@ -9,7 +9,7 @@ export interface Keyframe { t: number; x: number; y: number; scale: number; opac
 export interface MotionInterval { id: string; t0: number; t1: number; }        // when an actor is sliding
 export interface ForceCue { id: string; t0: number; t1: number; dir: WBDir; }
 export interface BeatMark { t0: number; t1: number; action: WBAction; fade?: number; } // note/mark; fade = when it clears
-export interface Track { id: string; icon?: string; label?: string; kfs: Keyframe[]; }
+export interface Track { id: string; icon?: string; box?: string; label?: string; kfs: Keyframe[]; }
 export interface Storyboard { tracks: Track[]; moves: MotionInterval[]; forces: ForceCue[]; marks: BeatMark[]; }
 
 const EASE: Record<WBEase, (p: number) => number> = {
@@ -31,7 +31,7 @@ const DIR: Record<string, [number, number]> = {
  *  scene-relative start of beat i (already narration-synced upstream). */
 export function buildStoryboard(actors: WBActor[], steps: BoardStep[], starts: number[], sceneEnd: number): Storyboard {
   const tracks = new Map<string, Track>();
-  for (const a of actors) tracks.set(a.id, { id: a.id, icon: a.icon, label: a.label, kfs: [] });
+  for (const a of actors) tracks.set(a.id, { id: a.id, icon: a.icon, box: a.box, label: a.label, kfs: [] });
   // live transform per actor as we walk the beats
   const cur = new Map<string, { x: number; y: number; scale: number; opacity: number; shown: boolean }>();
   for (const a of actors) cur.set(a.id, { x: a.at[0], y: a.at[1], scale: a.scale ?? 1, opacity: 1, shown: false });

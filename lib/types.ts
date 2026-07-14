@@ -610,6 +610,9 @@ export interface WBActor {
   id: string;
   /** Concept word → resolved to a hand-drawn icon (same resolver as objects). */
   icon?: string;
+  /** A VALUE cell instead of an icon: a drawn box with this text inside (array
+   *  cell, variable, stack frame — the primitive technical explainers need). */
+  box?: string;
   /** Handwritten label under the actor. */
   label?: string;
   /** Starting anchor as [x,y] fractions (0..1). */

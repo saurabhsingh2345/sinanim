@@ -241,18 +241,50 @@ export function compileBlueprint(raw: any): WhiteboardScene {
 // ── story mode: persistent actors + a beat timeline of ACTIONS (motion) ───────────
 const nid = (v: any) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, '-');
 
+// Deterministic overlap removal: LLMs are unreliable at spacing, so treat each
+// actor as a box and relax overlaps apart along the axis of least penetration,
+// keeping everything within safe margins. This is the real fix for "drawn on top".
+interface DBox { x: number; y: number; hw: number; hh: number }
+function declutter(boxes: DBox[], iters = 60): void {
+  for (let it = 0; it < iters; it++) {
+    let moved = false;
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i], b = boxes[j];
+        const dx = b.x - a.x;
+        let dy = b.y - a.y;
+        if (dx === 0 && dy === 0) { dy = (j - i) * 0.001; }   // break exact-overlap symmetry
+        const needX = a.hw + b.hw + 0.02, needY = a.hh + b.hh + 0.025;
+        const ox = needX - Math.abs(dx), oy = needY - Math.abs(dy);
+        if (ox > 0 && oy > 0) {
+          moved = true;
+          if (ox <= oy) { const s = (dx < 0 ? -1 : 1) * ox / 2; a.x -= s; b.x += s; }
+          else { const s = (dy < 0 ? -1 : 1) * oy / 2; a.y -= s; b.y += s; }
+        }
+      }
+    }
+    for (const bx of boxes) { bx.x = clamp(bx.x, 0.08 + bx.hw, 0.92 - bx.hw); bx.y = clamp(bx.y, 0.24 + bx.hh, 0.9 - bx.hh); }
+    if (!moved) break;
+  }
+}
+
 export function compileStory(raw: any): WhiteboardScene {
   const title = String(raw?.title ?? '').trim() || 'Explainer';
   const board: BoardStyle = ['white', 'blackboard', 'paper'].includes(raw?.board) ? raw.board : 'white';
   const rawActors: any[] = Array.isArray(raw?.actors) ? raw.actors : [];
   const actors: WBActor[] = rawActors.map((a: any, i: number) => {
     const label = a?.label ? String(a.label) : undefined;
-    const icon = String(a?.icon ?? a?.src ?? label ?? '').trim();
+    const box = a?.box != null && a.box !== '' ? String(a.box) : undefined;
+    const icon = box ? undefined : String(a?.icon ?? a?.src ?? label ?? '').trim();
     const at: [number, number] = Array.isArray(a?.at)
       ? [clamp(Number(a.at[0]) || 0.5, 0, 1), clamp(Number(a.at[1]) || 0.5, 0, 1)]
       : [rawActors.length > 1 ? 0.2 + 0.6 * (i / (rawActors.length - 1)) : 0.5, 0.52];
-    return { id: nid(a?.id ?? label ?? `a${i}`) || `a${i}`, icon, label, at, scale: a?.scale ? clamp(Number(a.scale) || 1, 0.1, 4) : undefined };
+    return { id: nid(a?.id ?? label ?? `a${i}`) || `a${i}`, icon, box, label, at, scale: a?.scale ? clamp(Number(a.scale) || 1, 0.1, 4) : undefined };
   }).filter((a) => a.id).slice(0, 10);
+  // pull overlapping starting positions apart so nothing is drawn on top of anything
+  const dboxes: DBox[] = actors.map((a) => ({ x: a.at[0], y: a.at[1], hw: a.box ? 0.085 : 0.07 * (a.scale ?? 1), hh: a.box ? 0.055 : 0.11 * (a.scale ?? 1) }));
+  declutter(dboxes);
+  actors.forEach((a, i) => { a.at = [dboxes[i].x, dboxes[i].y]; });
   const ids = new Set(actors.map((a) => a.id));
 
   const rawBeats: any[] = Array.isArray(raw?.beats) ? raw.beats : [];

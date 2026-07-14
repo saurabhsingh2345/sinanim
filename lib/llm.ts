@@ -566,6 +566,7 @@ const WHITEBOARD_SYSTEM = `You design ANIMATED hand-drawn whiteboard explainers.
   "mode":"story", "title":"<short>", "board":"white",
   "intro":"<1 sentence spoken as the title is written>",
   "actors":[ { "id":"ball", "icon":"<concrete noun>", "label":"<short or omit>", "at":[x,y], "scale":1 } ],
+  // For a VALUE — a number, variable, array element, stack frame — use "box" INSTEAD of "icon": { "id":"e1", "box":"3", "at":[0.35,0.5] }. The box is drawn with the value inside. Icons are for real-world things (ball, server); boxes are for DATA.
   "beats":[ { "say":"<1-2 spoken sentences>", "do":[ <actions> ] } ]
 }
 "at" is the STARTING position as [x,y] fractions: x 0=left→1=right, y 0=TOP→1=BOTTOM (so DOWN is larger y). ACTIONS in a beat's "do":
@@ -595,7 +596,8 @@ EXAMPLE (Newton's 1st law — SHOW it):
 Layouts: flow=pipeline/cause-chain, compare=X vs Y (use groups + good/bad), cycle=loop, hub=center+parts (center first), tree=splits into branches, timeline=ordered stages.
 
 RULES (both modes):
-- 3-6 actors/nodes. Fewer, well-chosen beats many. EVERY actor/node needs a concrete drawable "icon" noun (ball, car, rocket, server, packet, database, apple, planet, engine, sun, magnet, clock, coin, lock) — never abstract.
+- 3-6 actors/nodes. Fewer, well-chosen beats many. Each is EITHER an "icon" (a concrete real-world noun: ball, car, rocket, server, packet, database, engine, lock) OR a "box" (a data value: a number, variable, array cell, stack frame). Use "box" for anything that is DATA/a value — never invent icon names like "number-3".
+- SPACE THINGS OUT: keep actors/boxes at least 0.16 apart in x (or 0.2 in y) so they never overlap. A row of array cells sits at e.g. x = 0.30, 0.46, 0.62… A moving item must have empty space to move INTO.
 - The teaching is in "say"/"beats" — explain WHY, show the idea happening, don't just name things.
 - DIRECTIONS ARE PHYSICAL: y grows DOWNWARD. Gravity/falling → "drop"; thrown/launched/at-an-angle → "throw"; pushed → "push" with the right dir. Don't send things the wrong way.
 - KEEP THE BOARD CLEAN: a label/actor stays until you remove it, so DON'T let beats pile drawings on top of each other. Place new elements in EMPTY space, and use {"act":"clear"} (or clear specific ids, or "fade") to retire finished elements before starting a new sub-idea. Every position [x,y] must be clear of what's already there.
