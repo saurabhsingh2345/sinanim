@@ -39,7 +39,18 @@ export function buildStoryboard(actors: WBActor[], steps: BoardStep[], starts: n
   const moves: MotionInterval[] = [];
   const forces: ForceCue[] = [];
   const marks: BeatMark[] = [];
-  const push = (id: string, kf: Keyframe) => tracks.get(id)?.kfs.push(kf);
+
+  // Keep every position on-frame, accounting for each actor's drawn size — so a
+  // move/push/throw target the model put off-screen is pulled back to the edge
+  // instead of sliding out of the window. (title top ~0.16, caption bottom ~0.9.)
+  const cl = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const dims = new Map<string, { hw: number; hh: number }>();
+  for (const a of actors) { const sc = a.scale ?? 1; dims.set(a.id, a.box ? { hw: 0.1, hh: 0.06 } : { hw: 0.07 * sc, hh: 0.12 * sc }); }
+  const clampXY = (id: string, x: number, y: number): [number, number] => {
+    const d = dims.get(id) ?? { hw: 0.09, hh: 0.11 };
+    return [cl(x, 0.08 + d.hw, 0.92 - d.hw), cl(y, 0.22 + d.hh, 0.88 - d.hh)];
+  };
+  const push = (id: string, kf: Keyframe) => { const [x, y] = clampXY(id, kf.x, kf.y); kf.x = x; kf.y = y; tracks.get(id)?.kfs.push(kf); };
 
   for (let bi = 0; bi < steps.length; bi++) {
     const t0 = starts[bi] ?? 0;
@@ -51,7 +62,7 @@ export function buildStoryboard(actors: WBActor[], steps: BoardStep[], starts: n
     acts.forEach((action, ai) => {
       const a0 = t0 + (win * ai) / n;
       const a1 = t0 + (win * (ai + 1)) / n;
-      applyAction(action, a0, a1, cur, push, moves, forces, marks);
+      applyAction(action, a0, a1, cur, push, moves, forces, marks, clampXY);
     });
     if (!acts.length) { /* narration-only beat: hold */ }
   }
@@ -65,6 +76,7 @@ function applyAction(
   cur: Map<string, { x: number; y: number; scale: number; opacity: number; shown: boolean }>,
   push: (id: string, kf: Keyframe) => void,
   moves: MotionInterval[], forces: ForceCue[], marks: BeatMark[],
+  clampXY: (id: string, x: number, y: number) => [number, number],
 ) {
   if (action.act === 'note' || action.act === 'mark') { marks.push({ t0: a0, t1: a1, action }); return; }
   if (action.act === 'clear') {
@@ -112,7 +124,7 @@ function applyAction(
       }
       push(action.id, { t: a1, x: tx, y: ty, scale: c.scale, opacity: c.opacity, drawP: 1, ease: action.ease ?? 'smooth' });
       if (action.lines !== false) moves.push({ id: action.id, t0: a0, t1: a1 });
-      c.x = tx; c.y = ty;
+      [c.x, c.y] = clampXY(action.id, tx, ty);
       break;
     }
     case 'drop': {  // gravity: accelerate straight down to the floor
@@ -120,7 +132,7 @@ function applyAction(
       push(action.id, { t: a0, x: c.x, y: c.y, scale: c.scale, opacity: c.opacity, drawP: 1, ease: 'linear' });
       push(action.id, { t: a1, x: c.x, y: floor, scale: c.scale, opacity: c.opacity, drawP: 1, ease: 'accelerate' });
       moves.push({ id: action.id, t0: a0, t1: a1 });
-      c.y = floor;
+      c.y = clampXY(action.id, c.x, floor)[1];
       break;
     }
     case 'throw': {  // projectile: rise to an apex, then fall under gravity to the target
@@ -131,7 +143,7 @@ function applyAction(
       push(action.id, { t: tm, x: (c.x + tx) / 2, y: apexY, scale: c.scale, opacity: c.opacity, drawP: 1, ease: 'decelerate' });
       push(action.id, { t: a1, x: tx, y: ty, scale: c.scale, opacity: c.opacity, drawP: 1, ease: 'accelerate' });
       moves.push({ id: action.id, t0: a0, t1: a1 });
-      c.x = tx; c.y = ty;
+      [c.x, c.y] = clampXY(action.id, tx, ty);
       break;
     }
     case 'push': {
@@ -145,7 +157,7 @@ function applyAction(
       const nx = c.x + dx * dist, ny = c.y + dy * dist;
       push(action.id, { t: a1, x: nx, y: ny, scale: c.scale, opacity: c.opacity, drawP: 1, ease: 'accelerate' });
       moves.push({ id: action.id, t0: antic, t1: a1 });
-      c.x = nx; c.y = ny;
+      [c.x, c.y] = clampXY(action.id, nx, ny);
       break;
     }
     case 'scale': {

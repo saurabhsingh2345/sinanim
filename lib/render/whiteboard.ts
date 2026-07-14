@@ -394,9 +394,10 @@ function drawStoryboard(ctx: CanvasRenderingContext2D, prep: Prepared, scene: Wh
     const act = m.action;
     ctx.save();
     ctx.globalAlpha *= fadeA;
-    if (act.act === 'note') drawText(ctx, { kind: 'text', text: act.text, at: act.at, size: act.size || 36, color: act.color }, p, W, H, rs, b.ink);
+    const safe = (at: [number, number]): [number, number] => [clamp(at[0], 0.06, 0.94), clamp(at[1], 0.06, 0.9)];
+    if (act.act === 'note') drawText(ctx, { kind: 'text', text: act.text, at: safe(act.at), size: act.size || 36, color: act.color }, p, W, H, rs, b.ink);
     else if (act.act === 'mark') {
-      if (act.kind === 'check' || act.kind === 'cross') drawMark(ctx, { kind: act.kind, at: act.at || [0.5, 0.5], color: act.color }, p, W, H, rs);
+      if (act.kind === 'check' || act.kind === 'cross') drawMark(ctx, { kind: act.kind, at: safe(act.at || [0.5, 0.5]), color: act.color }, p, W, H, rs);
       else drawAnnot(ctx, { kind: act.kind, from: act.from, to: act.to, color: act.color }, p, W, H, rs, act.color || b.ink);
     }
     ctx.restore();
