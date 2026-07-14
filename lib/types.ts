@@ -555,6 +555,103 @@ export interface CheatsheetScene extends BaseScene {
   items: CheatsheetItem[];
 }
 
+// ── Whiteboard / explainer animation ───────────────────────────────────────────
+// A clean board onto which hand-written text, imported SVG objects, and sketched
+// annotations are "drawn on" by a marker, beat by beat — the explainer-video look.
+export type BoardStyle = 'white' | 'blackboard' | 'paper';
+
+export interface BoardText {
+  kind: 'text';
+  text: string;
+  /** Center anchor of the text block, as fractions of width/height (0..1). */
+  at: [number, number];
+  /** Font size in px at 1080p height (scaled to the frame). Default 40. */
+  size?: number;
+  color?: string;
+  /** Seconds to write it on (default derived from length). */
+  draw?: number;
+}
+export interface BoardObject {
+  kind: 'object';
+  /** SVG filename under public/objects (e.g. 'student.svg'), or a /objects path. */
+  src: string;
+  /** Center anchor as fractions of width/height (0..1). */
+  at: [number, number];
+  /** Multiplier on the base object size (~24% of the min frame side). */
+  scale?: number;
+  /** Ink/stroke tint for the draw-on. */
+  color?: string;
+  draw?: number;
+}
+export interface BoardAnnot {
+  /** arrow/underline/box/circle sketch, a translucent marker "highlight" swipe,
+   *  or a "curve" (gently bowed arrow) — all from→to. */
+  kind: 'arrow' | 'underline' | 'box' | 'circle' | 'highlight' | 'curve';
+  /** Endpoints (or box corners) as fractions of width/height (0..1). */
+  from?: [number, number];
+  to?: [number, number];
+  color?: string;
+  draw?: number;
+}
+/** A small point-anchored mark drawn in one flick: a tick or a cross. */
+export interface BoardMark {
+  kind: 'check' | 'cross';
+  at: [number, number];
+  color?: string;
+  draw?: number;
+}
+export type BoardElement = BoardText | BoardObject | BoardAnnot | BoardMark;
+
+// ── Story mode: persistent actors that MOVE, not just draw-on ─────────────────────
+// A whiteboard can run as an animated scene: actors are placed once and then
+// acted on across beats (drawn, moved with easing, pushed by a force, scaled…),
+// following real motion principles (slow-in/out, anticipation, motion lines).
+export interface WBActor {
+  id: string;
+  /** Concept word → resolved to a hand-drawn icon (same resolver as objects). */
+  icon?: string;
+  /** Handwritten label under the actor. */
+  label?: string;
+  /** Starting anchor as [x,y] fractions (0..1). */
+  at: [number, number];
+  scale?: number;
+}
+export type WBEase = 'linear' | 'smooth' | 'accelerate' | 'decelerate' | 'bounce' | 'anticipate';
+export type WBDir = 'left' | 'right' | 'up' | 'down' | 'up-left' | 'up-right' | 'down-left' | 'down-right';
+export type WBAction =
+  | { act: 'draw' | 'appear' | 'fade' | 'shake' | 'pulse'; id: string }
+  | { act: 'move'; id: string; to: [number, number]; ease?: WBEase; lines?: boolean; arc?: boolean }
+  | { act: 'push'; id: string; dir: WBDir; distance?: number }
+  | { act: 'drop'; id: string; to?: number }                          // fall under gravity to a floor y
+  | { act: 'throw'; id: string; to: [number, number]; height?: number } // parabolic arc (projectile)
+  | { act: 'scale'; id: string; to: number }
+  | { act: 'clear'; ids?: string[] }                                  // fade finished elements — keep the board clean
+  | { act: 'note'; text: string; at: [number, number]; size?: number; color?: string }
+  | { act: 'mark'; kind: 'arrow' | 'curve' | 'underline' | 'circle' | 'highlight' | 'check' | 'cross'; from?: [number, number]; to?: [number, number]; at?: [number, number]; color?: string };
+
+/** One narration beat: elements drawn on (diagram mode) and/or actions played
+ *  (story mode) while this line is spoken. */
+export interface BoardStep {
+  narration?: string;
+  add: BoardElement[];
+  /** Story-mode actions performed during this beat. */
+  do?: WBAction[];
+}
+
+export interface WhiteboardScene extends BaseScene {
+  type: 'whiteboard';
+  /** Board surface style. Default 'white'. */
+  board?: BoardStyle;
+  /** Show the sleek marker following the stroke (default true). */
+  pen?: boolean;
+  /** Story-mode persistent actors (when present, the scene animates them). */
+  actors?: WBActor[];
+  steps: BoardStep[];
+  /** Set by the narration pipeline: scene-relative start of each step's first
+   *  spoken sentence, so the draw-on lands with the voice. */
+  stepNarrationTimes?: number[];
+}
+
 export type Scene =
   | CodeScene
   | TerminalScene
@@ -583,7 +680,8 @@ export type Scene =
   | PrScene
   | LayoutScene
   | RecallScene
-  | CheatsheetScene;
+  | CheatsheetScene
+  | WhiteboardScene;
 
 /** Course / lesson brand kit applied as default theme accent. */
 export interface BrandKit {
@@ -599,7 +697,7 @@ export const OVERLAY_TYPES = new Set(['mascot', 'highlight', 'text', 'sprite', '
 export const PRIMARY_CARD_TYPES = new Set([
   'title', 'chapter', 'bullets', 'diagram', 'quote', 'bigstat', 'quiz', 'challenge', 'viz',
   'ide', 'cli', 'browser', 'browserrec', 'split', 'api', 'pr', 'layout',
-  'recall', 'cheatsheet',
+  'recall', 'cheatsheet', 'whiteboard',
 ]);
 
 export interface AnimationDSL {

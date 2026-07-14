@@ -1,4 +1,4 @@
-import { AnimationDSL, AnimProp, BrowserBlock, CliCommand, Easing, IdeAction, IdeFile, IdeStep, Keyframe, LayoutRegion, Scene, SceneTransition, SplitStep } from './types';
+import { AnimationDSL, AnimProp, BoardElement, BoardStep, BrowserBlock, CliCommand, Easing, IdeAction, IdeFile, IdeStep, Keyframe, LayoutRegion, Scene, SceneTransition, SplitStep } from './types';
 import { clamp } from './utils';
 import { typeDuration } from './timing';
 import { diffLines } from './diff';
@@ -815,6 +815,64 @@ export function normalizeDSL(raw: any): AnimationDSL {
           source: s.source ? String(s.source) : undefined,
           ...base,
         };
+      case 'whiteboard': {
+        const frac = (v: any, d: number) => { const n = Number(v); return isFinite(n) ? clamp(n, 0, 1) : d; };
+        const pair = (v: any, dx: number, dy: number): [number, number] =>
+          Array.isArray(v) ? [frac(v[0], dx), frac(v[1], dy)] : [dx, dy];
+        const normEl = (e: any): BoardElement | null => {
+          const k = String(e?.kind ?? '');
+          const draw = e?.draw != null ? clamp(Number(e.draw) || 0, 0.2, 8) : undefined;
+          const color = e?.color ? String(e.color) : undefined;
+          if (k === 'text')
+            return { kind: 'text', text: String(e.text ?? ''), at: pair(e.at, 0.5, 0.5),
+              size: e.size ? clamp(Number(e.size) || 0, 10, 200) : undefined, color, draw };
+          if (k === 'object')
+            return { kind: 'object', src: String(e.src ?? ''), at: pair(e.at, 0.5, 0.5),
+              scale: e.scale ? clamp(Number(e.scale) || 1, 0.1, 5) : undefined, color, draw };
+          if (k === 'arrow' || k === 'underline' || k === 'box' || k === 'circle' || k === 'highlight' || k === 'curve')
+            return { kind: k, from: e.from ? pair(e.from, 0.4, 0.5) : undefined,
+              to: e.to ? pair(e.to, 0.6, 0.5) : undefined, color, draw };
+          if (k === 'check' || k === 'cross')
+            return { kind: k, at: pair(e.at, 0.5, 0.5), color, draw };
+          return null;
+        };
+        const id = (v: any) => String(v ?? '').trim();
+        const normAction = (a: any): any | null => {
+          const act = String(a?.act ?? '');
+          const color = a?.color ? String(a.color) : undefined;
+          const DIRS = ['left', 'right', 'up', 'down', 'up-left', 'up-right', 'down-left', 'down-right'];
+          if (act === 'draw' || act === 'appear' || act === 'fade' || act === 'shake' || act === 'pulse') return a?.id ? { act, id: id(a.id) } : null;
+          if (act === 'move') return a?.id ? { act, id: id(a.id), to: pair(a.to, 0.5, 0.5), ease: a?.ease ? String(a.ease) : undefined, lines: a?.lines !== false, arc: a?.arc === true } : null;
+          if (act === 'push') return a?.id ? { act, id: id(a.id), dir: DIRS.includes(a?.dir) ? a.dir : 'right', distance: a?.distance != null ? clamp(Number(a.distance) || 0.3, 0.05, 0.7) : undefined } : null;
+          if (act === 'drop') return a?.id ? { act, id: id(a.id), to: a?.to != null ? clamp(Number(a.to) || 0.82, 0, 1) : undefined } : null;
+          if (act === 'throw') return a?.id ? { act, id: id(a.id), to: pair(a.to, 0.7, 0.7), height: a?.height != null ? clamp(Number(a.height) || 0.22, 0.05, 0.5) : undefined } : null;
+          if (act === 'clear') return { act, ids: Array.isArray(a?.ids) ? a.ids.map(id).filter(Boolean) : undefined };
+          if (act === 'scale') return a?.id ? { act, id: id(a.id), to: clamp(Number(a.to) || 1, 0.1, 4) } : null;
+          if (act === 'note') return { act, text: String(a?.text ?? ''), at: pair(a.at, 0.5, 0.5), size: a?.size ? clamp(Number(a.size) || 0, 10, 200) : undefined, color };
+          if (act === 'mark') { const el = normEl({ ...a, kind: a?.kind }); return el ? { act, kind: el.kind, from: (el as any).from, to: (el as any).to, at: (el as any).at, color } : null; }
+          return null;
+        };
+        const steps: BoardStep[] = (Array.isArray(s.steps) ? s.steps : []).slice(0, 24).map((st: any) => ({
+          narration: st?.narration ? String(st.narration) : undefined,
+          add: (Array.isArray(st?.add) ? st.add : []).map(normEl).filter(Boolean).slice(0, 16) as BoardElement[],
+          do: Array.isArray(st?.do) ? st.do.map(normAction).filter(Boolean).slice(0, 8) : undefined,
+        }));
+        const actors = Array.isArray(s.actors) ? s.actors.slice(0, 12).map((a: any) => ({
+          id: id(a?.id),
+          icon: a?.icon ? String(a.icon) : undefined,
+          label: a?.label ? String(a.label) : undefined,
+          at: pair(a?.at, 0.5, 0.5),
+          scale: a?.scale ? clamp(Number(a.scale) || 1, 0.1, 4) : undefined,
+        })).filter((a: any) => a.id) : undefined;
+        return {
+          type: 'whiteboard',
+          board: ['white', 'blackboard', 'paper'].includes(s.board) ? s.board : 'white',
+          pen: s.pen !== false,
+          ...(actors && actors.length ? { actors } : {}),
+          steps,
+          ...base,
+        };
+      }
       case 'cheatsheet': {
         const rawItems = Array.isArray(s.items) ? s.items : [];
         const items = rawItems
@@ -997,6 +1055,17 @@ export function repace(dsl: AnimationDSL): AnimationDSL {
         // question holds, a breath, then the answer reveals — needs room for both
         const start = cursor;
         const duration = Math.max(s.duration, 4.2);
+        panelStart = start;
+        panelEnd = start + duration;
+        cursor = panelEnd + SECTION_GAP;
+        return { ...s, startTime: start, duration };
+      }
+      case 'whiteboard': {
+        // Every element needs a beat to draw on; narration stretches it further.
+        const start = cursor;
+        const cost = s.steps.reduce((a, st) => a + 0.4 + (st.do ? st.do.length * 1.6 : 0) + st.add.reduce((b, e) =>
+          b + (e.draw ?? (e.kind === 'text' ? clamp(0.5 + e.text.replace(/\n/g, '').length * 0.03, 0.7, 3.4) : e.kind === 'object' ? 1.8 : 0.7)) + 0.2, 0), 0);
+        const duration = Math.max(s.duration, 1.0 + cost);
         panelStart = start;
         panelEnd = start + duration;
         cursor = panelEnd + SECTION_GAP;

@@ -150,7 +150,7 @@ export async function buildNarration(
 
     // per-step sync: a step starts when its first narration sentence is spoken
     const scene = dsl.scenes[i];
-    if (scene.type === 'ide' && hasStepNarration(scene.steps)) {
+    if ((scene.type === 'ide' || scene.type === 'whiteboard') && hasStepNarration(scene.steps)) {
       stepSync.set(i, stepStartsFromSentences(scene.steps, sentences.length, infos.map((x) => x.offset)));
     }
   }
@@ -159,7 +159,7 @@ export async function buildNarration(
   const paced = paceToNarration(dsl, durations);
   stepSync.forEach((times, i) => {
     const s = paced.scenes[i];
-    if (s.type === 'ide') s.stepNarrationTimes = times;
+    if (s.type === 'ide' || s.type === 'whiteboard') s.stepNarrationTimes = times;
   });
   return { dsl: paced, buffers, words };
 }

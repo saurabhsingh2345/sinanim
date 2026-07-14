@@ -57,6 +57,10 @@ export function sceneBeatTitle(s: Scene, index: number): string {
       return s.concept ? `Recall: ${s.concept}` : 'Quick recall';
     case 'cheatsheet':
       return s.title || 'Cheat sheet';
+    case 'whiteboard': {
+      const firstText = s.steps.flatMap((st) => st.add).find((e) => e.kind === 'text');
+      return (firstText && firstText.kind === 'text' && firstText.text.split('\n')[0]) || 'On the whiteboard';
+    }
     default:
       return `Beat ${index + 1}`;
   }
@@ -87,6 +91,7 @@ export function sceneTypeLabel(type: Scene['type']): string {
     terminal: 'Terminal output',
     recall: 'Recall',
     cheatsheet: 'Cheat sheet',
+    whiteboard: 'Whiteboard',
   };
   return map[type] || type;
 }
@@ -96,6 +101,7 @@ export const INSERT_CATALOG: InsertCatalogItem[] = [
   { type: 'chapter', label: 'Chapter', useWhen: 'Divide a longer lesson into sections', group: 'teach' },
   { type: 'bullets', label: 'Bullet list', useWhen: 'Goals, recap, or key takeaways', group: 'teach' },
   { type: 'diagram', label: 'Diagram', useWhen: 'Show how pieces connect', group: 'teach' },
+  { type: 'whiteboard', label: 'Whiteboard', useWhen: 'Hand-drawn explainer: objects + written text draw on', group: 'teach' },
   { type: 'quote', label: 'Quote', useWhen: 'Land a memorable line', group: 'teach' },
   { type: 'ide', label: 'VS Code', useWhen: 'Build files, type code, run commands', group: 'code' },
   { type: 'cli', label: 'Terminal', useWhen: 'Scaffold, install, run CLI tools', group: 'code' },
@@ -163,6 +169,23 @@ export function blankScene(type: Scene['type'], startTime: number): Scene {
         attribution: 'Kent Beck',
         ...base,
         duration: 4,
+      };
+    case 'whiteboard':
+      return {
+        type: 'whiteboard',
+        board: 'white',
+        pen: true,
+        steps: [
+          { narration: 'Meet our learner.', add: [{ kind: 'object', src: 'student.svg', at: [0.28, 0.55], scale: 1.2 }] },
+          { narration: 'They pick up a new idea…', add: [
+            { kind: 'text', text: 'A new idea', at: [0.68, 0.32], size: 54 },
+            { kind: 'object', src: 'lightbulb.svg', at: [0.7, 0.58], scale: 0.9 },
+          ] },
+          { narration: '…and it clicks.', add: [{ kind: 'circle', from: [0.6, 0.44], to: [0.8, 0.72] }] },
+        ],
+        ...base,
+        duration: 12,
+        narration: 'Let me draw this out for you.',
       };
     case 'ide':
       return {

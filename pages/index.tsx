@@ -23,6 +23,7 @@ import {
   Repeat,
   GitBranch,
   Search,
+  PenTool,
 } from 'lucide-react';
 import { AnimationDSL } from '@/lib/types';
 import { normalizeDSL, repace } from '@/lib/dsl';
@@ -51,11 +52,19 @@ const VIDEO_EXAMPLES = [
   'Explain how an HTTP request flows from browser to database, with a diagram',
 ];
 
-type Mode = 'course' | 'video';
+const WHITEBOARD_EXAMPLES = [
+  "Newton's three laws of motion, one law per beat",
+  'How DNS turns a domain name into an IP address',
+  'What a hash map is and why lookups are fast',
+  'How photosynthesis turns sunlight into energy',
+];
+
+type Mode = 'course' | 'video' | 'whiteboard';
 
 export default function Home() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>('course');
+  const [wbVision, setWbVision] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [dsl, setDsl] = useState<AnimationDSL | null>(null);
   const [loading, setLoading] = useState(false);
@@ -131,9 +140,10 @@ export default function Home() {
   // clearly progresses instead of looking frozen
   const LESSON_STAGES = ['scripting the lesson…', 'reviewing the code…', 'writing the voiceover…', 'polishing checkpoints…', 'almost there…'];
   const COURSE_STAGES = ['planning the modules…', 'sequencing lessons…', 'writing objectives…', 'almost there…'];
+  const WHITEBOARD_STAGES = ['sketching the board…', 'placing the icons…', 'writing the voiceover…', 'almost there…'];
   useEffect(() => {
     if (!loading) { setStage(0); return; }
-    const steps = mode === 'course' ? COURSE_STAGES : LESSON_STAGES;
+    const steps = mode === 'course' ? COURSE_STAGES : mode === 'whiteboard' ? WHITEBOARD_STAGES : LESSON_STAGES;
     const t = setInterval(() => setStage((s) => Math.min(s + 1, steps.length - 1)), 5500);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -173,14 +183,18 @@ export default function Home() {
         router.push(`/course/${stored.outline.id}`);
         return; // keep the spinner until navigation
       }
-      const res = await fetch('/api/generate-dsl', {
+      const endpoint = mode === 'whiteboard' ? '/api/generate-whiteboard' : '/api/generate-dsl';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: fullPrompt, model }),
+        body: JSON.stringify({ prompt: fullPrompt, model, ...(mode === 'whiteboard' ? { vision: wbVision } : {}) }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Generation failed');
       applyDsl(customize(data.dsl), prompt);
+      // the whiteboard result plays in the same Studio as a lesson — the result
+      // section is gated on 'video', so surface it there (mode is just display now).
+      if (mode === 'whiteboard') setMode('video');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error');
     } finally {
@@ -212,7 +226,7 @@ export default function Home() {
     return online ? `${name} · online` : `${name} · offline`;
   }, [online, providerLabel]);
 
-  const examples = mode === 'course' ? COURSE_EXAMPLES : VIDEO_EXAMPLES;
+  const examples = mode === 'course' ? COURSE_EXAMPLES : mode === 'whiteboard' ? WHITEBOARD_EXAMPLES : VIDEO_EXAMPLES;
 
   return (
     <>
@@ -265,6 +279,9 @@ export default function Home() {
             <button className={mode === 'video' ? 'mode on' : 'mode'} onClick={() => setMode('video')}>
               <Clapperboard size={15} /> single lesson
             </button>
+            <button className={mode === 'whiteboard' ? 'mode on' : 'mode'} onClick={() => setMode('whiteboard')}>
+              <PenTool size={15} /> whiteboard
+            </button>
           </div>
 
           <div className="promptbox">
@@ -278,6 +295,8 @@ export default function Home() {
               placeholder={
                 mode === 'course'
                   ? 'What do you want to teach? e.g. "Python decorators for working developers"'
+                  : mode === 'whiteboard'
+                  ? 'What concept should the board explain? e.g. "Newton\'s three laws of motion"'
                   : 'Describe one lesson, e.g. "Teach list comprehensions: loop first, then diff it into a comprehension"'
               }
               spellCheck={false}
@@ -286,11 +305,18 @@ export default function Home() {
             <button className="generate" onClick={generate} disabled={loading || !prompt.trim()}>
               {loading ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}
               {loading
-                ? (mode === 'course' ? COURSE_STAGES : LESSON_STAGES)[stage]
-                : mode === 'course' ? 'Build course' : 'Make lesson'}
+                ? (mode === 'course' ? COURSE_STAGES : mode === 'whiteboard' ? WHITEBOARD_STAGES : LESSON_STAGES)[stage]
+                : mode === 'course' ? 'Build course' : mode === 'whiteboard' ? 'Draw explainer' : 'Make lesson'}
               <kbd>⌘⏎</kbd>
             </button>
           </div>
+
+          {mode === 'whiteboard' && (
+            <label className="wbvision">
+              <input type="checkbox" checked={wbVision} onChange={(e) => setWbVision(e.target.checked)} />
+              <PenTool size={13} /> polish with vision — the engine reviews its own render and fixes overlaps/off-frame issues <em>(a little slower + costs a bit more)</em>
+            </label>
+          )}
 
           <div className="tunerow">
             <label className="tune">
@@ -335,7 +361,7 @@ export default function Home() {
           </div>
 
           <div className="templates">
-            <div className="tlabel">or start from a template — no recording, just render</div>
+            <div className="tlabel">or start from a template — no recording, just render <Link href="/objects" className="gallerylink">· browse drawable objects →</Link></div>
             <div className="tgrid">
               {TEMPLATES.map((t) => {
                 const Icon =
@@ -352,6 +378,9 @@ export default function Home() {
                   : t.id === 'layout' ? LayoutTemplate
                   : t.id === 'diagram' ? Network
                   : t.id === 'challenge' ? FlaskConical
+                  : t.id === 'whiteboard' ? PenTool
+                  : t.id === 'whiteboard-flow' ? PenTool
+                  : t.id === 'whiteboard-compare' ? PenTool
                   : GitPullRequest;
                 return (
                   <button
@@ -514,6 +543,9 @@ export default function Home() {
         }
         .generate:hover:not(:disabled) { filter: brightness(1.07); }
         .generate:disabled { opacity: 0.45; cursor: not-allowed; }
+        .wbvision { display: flex; align-items: center; gap: 7px; margin-top: 10px; font-size: 12.5px; color: var(--dim, #a9b0c4); cursor: pointer; }
+        .wbvision input { accent-color: #8aa0ff; cursor: pointer; }
+        .wbvision em { color: #7d849c; font-style: normal; }
         .generate kbd { margin-left: 4px; font-size: 11px; background: rgba(0, 0, 0, 0.22); padding: 2px 6px; border-radius: 5px; }
 
         .warn, .err {
@@ -533,6 +565,8 @@ export default function Home() {
 
         .templates { margin-top: 30px; }
         .tlabel { color: var(--dimmer); font-size: 12px; text-align: center; margin-bottom: 12px; }
+        .tlabel :global(.gallerylink) { color: #8aa0ff; text-decoration: none; }
+        .tlabel :global(.gallerylink):hover { text-decoration: underline; }
         .tgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; max-width: 1020px; margin: 0 auto; }
         .tcard {
           display: flex; flex-direction: column; gap: 0; text-align: left;

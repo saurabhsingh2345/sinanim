@@ -100,6 +100,8 @@ SCENE TYPES (every scene needs "startTime" and "duration" in seconds; all accept
 - chapter:  { "type":"chapter", "number":1, "text":"Setting up", "startTime":3, "duration":2.5, "narration":"..." }  — section divider card. Use between major sections of longer lessons.
 - bullets:  { "type":"bullets", "title":"What you'll learn", "items":["First point","Second point","Third point"], "startTime":5, "duration":6, "narration":"..." }  — full-screen list, points reveal one by one in sync with the voice. 3-5 short items. Great for intros, recaps, and concept summaries.
 - diagram:  { "type":"diagram", "title":"Request flow", "nodes":[{"id":"a","label":"Client","x":0.2,"y":0.5},{"id":"b","label":"Server","x":0.5,"y":0.5},{"id":"c","label":"DB","x":0.8,"y":0.5}], "edges":[{"from":"a","to":"b","label":"HTTP"},{"from":"b","to":"c"}], "startTime":11, "duration":7, "narration":"..." }  — animated flowchart. Node x/y are fractions (0..1); spread nodes out, 2-6 nodes.
+- whiteboard:{ "type":"whiteboard", "board":"white", "steps":[ {"narration":"Picture a request leaving your app.","add":[{"kind":"object","src":"laptop.svg","at":[0.2,0.55],"scale":1.2},{"kind":"text","text":"your app","at":[0.2,0.85],"size":40}]}, {"narration":"It travels to the server,","add":[{"kind":"object","src":"cloud.svg","at":[0.55,0.4],"scale":1.1},{"kind":"arrow","from":[0.32,0.52],"to":[0.46,0.42]}]}, {"narration":"which reads from the database and answers.","add":[{"kind":"object","src":"database.svg","at":[0.82,0.55],"scale":1.0},{"kind":"arrow","from":[0.64,0.45],"to":[0.76,0.52]},{"kind":"circle","from":[0.46,0.28],"to":[0.64,0.55]}]} ], "startTime":11, "duration":16, "narration":"Let me draw out how this actually flows." }  — a HAND-DRAWN EXPLAINER: a clean board where handwritten text, imported SVG objects, and sketched arrows/underlines/boxes/circles DRAW ON one at a time behind a marker, each synced to the voice. Use it to build INTUITION for a concept — a mental model, a metaphor, how the pieces relate — the illustrated counterpart to the ide's concrete code. Element kinds: "text"{text,at,size?}, "object"{src,at,scale?}, "arrow"/"underline"/"box"/"circle"/"highlight"(translucent marker swipe to emphasize)/"curve"(bowed arrow){from,to}, "check"/"cross"(a tick or an x){at}. Any element may set "color". Every "at"/"from"/"to" is an [x,y] fraction (0..1) of the frame; spread things out and don't overlap. "board" one of "white"(default)/"blackboard"/"paper". OBJECTS — set "src" to a plain CONCEPT WORD and the engine draws a matching hand-drawn line icon locally (5,000+ icons; no filenames, no need to guess). Use the actor's noun: e.g. "server", "database", "user", "cloud", "browser", "laptop", "rocket", "lock", "key", "shield", "money", "idea", "book", "clock", "target", "git-branch", "chart", "mail", "robot", "package". Any common noun resolves; an unmatched word falls back to a sketched box, so pick a concrete thing. Like "ide", the teaching lives in per-step "narration" (one short spoken line per step, drawn while spoken); the scene-level "narration" is a 1-2 sentence INTRO only. 3-6 steps; label objects with short handwritten "text"; use an arrow/circle to connect or emphasize. Prefer this over "diagram" when you want a warm, narrated, illustrated walkthrough rather than a boxes-and-lines flowchart.
+  CRITICAL: every step's "add" MUST contain 1-4 elements, at least one of them an "object" or "text" — the "narration" SAYS it, the "add" DRAWS it. A step with "add":[] paints a BLANK board and is INVALID. Concretely, a DNS lookup whiteboard step looks like {"narration":"The browser asks a resolver.","add":[{"kind":"object","src":"laptop.svg","at":[0.2,0.5]},{"kind":"text","text":"browser","at":[0.2,0.78],"size":36},{"kind":"object","src":"cloud.svg","at":[0.5,0.4]},{"kind":"arrow","from":[0.3,0.48],"to":[0.44,0.42]}]} — pick an object for each actor, label it, and arrow between them. Reuse/keep earlier objects' positions across steps so the picture accumulates.
 - viz:      { "type":"viz", "title":"Bubble sort", "vizKind":"array", "steps":[ {"caption":"Compare the first two","array":["5","2","8","1"],"compare":[0,1],"pointers":[{"name":"i","index":0}]}, {"caption":"Swap them","array":["2","5","8","1"],"done":[]}, ... ], "startTime":20, "duration":12, "narration":"..." }  — ANIMATE THE IDEA behind an algorithm, not the code. Each step carries the FULL state; the engine tweens between steps (values pop, pointers glide, stack frames push and pop). Per step you may set: "array" (cell values), "highlight"/"compare"/"done" (index arrays), "pointers" ([{name,index}] labelled arrows that walk the array), "vars" ({name:value} boxes that update, e.g. an accumulator), "stack" (bottom→top frames, for recursion/call stack). 3-8 steps. USE THIS for sorting, searching, two-pointer, loops building a value, and recursion — it makes abstract steps visible. Keep the array ≤ 10 cells. The narration should walk through the steps.
 - quote:    { "type":"quote", "text":"Explicit is better than implicit.", "attribution":"The Zen of Python", "startTime":18, "duration":4, "narration":"..." }  — big centered statement.
 - bigstat:  { "type":"bigstat", "value":"10x", "label":"faster than the naive version", "startTime":22, "duration":3.5, "narration":"..." }  — one huge number that counts up.
@@ -134,6 +136,7 @@ LESSON STRUCTURE (DEFAULT — prefer this for coding topics):
 2. "bullets" card: what you will learn / the concrete problem (2-4 items).
 3. "ide" scene — the FLAGSHIP teaching surface. Build the example in a real VS Code workspace using the mandatory rhythm: small type, then explain (glow the lines, teach them), type, explain, run, then explain the output (terminal:true). Per-step "narration" on every step, 2-4 sentences each. This scene should carry MOST of the lesson spoken depth. Prefer "ide" over separate "code"+"terminal" panels.
 4. For loops / algorithms / accumulators: a "viz" scene that animates the idea (pointers, vars, array steps).
+4b. To build INTUITION for a concept, metaphor, or how components relate (before or after the code): a "whiteboard" scene that draws the mental model out by hand — a warm, narrated alternative to a plain "diagram". At most one per lesson.
 5. Optional "api" scene when teaching HTTP/REST/Flask endpoints (Postman-style).
 6. A "quiz" checkpoint after the key concept.
 7. For Python/JS hands-on topics: ONE "challenge" near the end.
@@ -152,6 +155,7 @@ RULES:
 - IDE type steps are CUMULATIVE: each "type" step's "code" is the WHOLE file so far (previous lines included), extended with the new lines. Never send only the new chunk — that erases the earlier lines. Small edit-in-place additions still repeat the full file with the new lines appended.
 - Keep every IDE file clean, like real code a developer would commit: NEVER repeat a line you already typed, no dead/duplicate statements, logical top-to-bottom order (define before use, except when you are deliberately showing an error). The final file must run and read well.
 - In "diff" scenes, "before" must exactly equal the code currently on screen.
+- Every "whiteboard" step MUST populate "add" with 1-4 visual elements (objects/text/arrows/etc.) — never emit a whiteboard step with an empty "add". If you can't picture a step, fold it into another step or drop it. Use at most two whiteboard scenes per lesson.
 - SCREEN LOCK: IDE/browser narration must describe exactly what is on screen at that beat — captions and voice agree ("we type range one to five", "we click Downloads"). Do not narrate syntax symbols the learner cannot see; describe the action.
 - When the prompt says look up / docs / download: use authored browser scenes (search → serp → docs), never live web fetch.
 - "backgroundColor" should match the theme (midnight → "#0b0b10"). Set top-level "theme" to one of the ThemePack ids. fps 30, width 1920, height 1080.
@@ -249,6 +253,35 @@ async function draftDSL(
     }
   }
   throw lastErr;
+}
+
+/** Safety net: a whiteboard step with an empty `add` paints a blank board. The
+ *  prompt demands real objects/text, but if the model still leaves one empty we
+ *  write its narration's key phrase on the board so the beat isn't dead air.
+ *  Only fires on non-compliant output; populated steps are untouched. */
+function enrichWhiteboards(dsl: AnimationDSL): AnimationDSL {
+  const short = (s: string) => {
+    const first = (s.split(/[.!?—:]/)[0] || s).trim();
+    const w = first.split(/\s+/).slice(0, 6).join(' ');
+    return w.length > 34 ? `${w.slice(0, 34).trim()}…` : w;
+  };
+  for (const scene of dsl.scenes) {
+    if (scene.type !== 'whiteboard') continue;
+    const textOf = (st: { narration?: string }) => (st.narration || scene.narration || '').trim();
+    const total = scene.steps.filter((st) => (!st.add || !st.add.length) && textOf(st)).length;
+    if (!total) continue;
+    let e = 0;
+    scene.steps = scene.steps.map((st) => {
+      if (st.add && st.add.length) return st;
+      const src = textOf(st);
+      if (!src) return st;
+      // stack the fallback lines evenly down the board, never overlapping
+      const y = total <= 1 ? 0.5 : 0.24 + (e / (total - 1)) * 0.56;
+      e++;
+      return { ...st, add: [{ kind: 'text', text: short(src), at: [0.5, y], size: total > 4 ? 40 : 46 }] };
+    });
+  }
+  return dsl;
 }
 
 export async function generateDSL(
@@ -517,6 +550,115 @@ export async function generateDSL(
     }
   }
 
-  return repace(dsl);
+  return repace(enrichWhiteboards(dsl));
+}
+
+// ── Dedicated whiteboard explainer — one cheap call, a designed board ─────────────
+// The model does NOT lay out pixels (that produced lazy, all-text boards). It
+// returns a BLUEPRINT: which layout fits, the concepts (each with an icon), and
+// how they relate. The compiler in lib/whiteboard/compose then places every icon,
+// routes edge-to-edge arrows, and reveals each piece with its narration. Brain =
+// LLM (semantics); layout = deterministic code (always well spaced, always drawn).
+const WHITEBOARD_SYSTEM = `You design ANIMATED hand-drawn whiteboard explainers. Given a TOPIC, think like a great teacher: is this best SHOWN AS MOTION (things that move or happen over time — a ball pushed, water flowing, a request travelling) or as a STRUCTURE (how parts relate — a comparison, a hierarchy, a cycle)? Pick a "mode" and return ONLY a JSON blueprint. You NEVER draw frames or invent pixel timing — a motion engine animates it. Your job is the THINKING: the actors, and what happens.
+
+── MODE "story" (PREFER THIS whenever something MOVES, travels, or changes — physics, cause→effect, a demonstration) ──
+{
+  "mode":"story", "title":"<short>", "board":"white",
+  "intro":"<1 sentence spoken as the title is written>",
+  "actors":[ { "id":"ball", "icon":"<concrete noun>", "label":"<short or omit>", "at":[x,y], "scale":1 } ],
+  "beats":[ { "say":"<1-2 spoken sentences>", "do":[ <actions> ] } ]
+}
+"at" is the STARTING position as [x,y] fractions: x 0=left→1=right, y 0=TOP→1=BOTTOM (so DOWN is larger y). ACTIONS in a beat's "do":
+- {"act":"draw","id":"ball"}                         reveal an actor where it stands
+- {"act":"move","id":"ball","to":[x,y],"ease":"smooth|accelerate|decelerate|bounce","arc":false}   slide to a point (leaves motion lines; "arc":true bows the path)
+- {"act":"push","id":"ball","dir":"left|right|up|down|up-left|up-right|down-left|down-right"}   red FORCE arrow, then it accelerates that way
+- {"act":"drop","id":"ball"}                          GRAVITY — falls straight down to the floor, speeding up
+- {"act":"throw","id":"ball","to":[x,y],"height":0.25}   PROJECTILE — arcs up then falls to the target (use for anything thrown/launched/falling at an angle)
+- {"act":"appear","id":"x"} / {"act":"fade","id":"x"} / {"act":"scale","id":"x","to":1.6} / {"act":"shake","id":"x"}
+- {"act":"note","text":"at rest","at":[x,y],"size":36}   handwrite a label
+- {"act":"mark","kind":"arrow|curve|circle|highlight|check|cross","from":[x,y],"to":[x,y]}  or {"kind":"check","at":[x,y]}
+- {"act":"clear"}                                     WIPE the board (fade every actor + label). Use between distinct sub-ideas so nothing draws over old content. {"act":"clear","ids":["ball"]} clears only those.
+EXAMPLE (Newton's 1st law — SHOW it):
+{ "mode":"story","title":"Newton's 1st Law","intro":"Things keep doing what they're already doing.",
+  "actors":[ {"id":"ball","icon":"ball-football","label":"ball","at":[0.22,0.55]}, {"id":"hand","icon":"hand-stop","at":[0.5,0.8]} ],
+  "beats":[
+    {"say":"A ball sits still. With no force on it, it stays exactly where it is.","do":[{"act":"draw","id":"ball"},{"act":"note","text":"at rest","at":[0.22,0.78],"size":34}]},
+    {"say":"Now give it a push.","do":[{"act":"push","id":"ball","dir":"right"}]},
+    {"say":"It keeps rolling on its own, slowing only from friction.","do":[{"act":"move","id":"ball","to":[0.78,0.55],"ease":"decelerate","lines":true}]},
+    {"say":"That resistance to change is called inertia.","do":[{"act":"note","text":"inertia","at":[0.5,0.28],"size":50}]}
+  ] }
+
+── MODE "diagram" (for STRUCTURE — comparisons, hierarchies, cycles, parts of a whole) ──
+{ "mode":"diagram","title":"<short>","layout":"flow|compare|cycle|hub|tree|timeline","intro":"<1 sentence>",
+  "nodes":[ {"id":"a","label":"<2-4 words>","icon":"<concrete noun>","say":"<1-2 sentences>","emphasis":"good|bad|key?","group":"left|right? (compare)"} ],
+  "links":[ {"from":"a","to":"b","label":"<optional>","style":"arrow|curve"} ] }
+Layouts: flow=pipeline/cause-chain, compare=X vs Y (use groups + good/bad), cycle=loop, hub=center+parts (center first), tree=splits into branches, timeline=ordered stages.
+
+RULES (both modes):
+- 3-6 actors/nodes. Fewer, well-chosen beats many. EVERY actor/node needs a concrete drawable "icon" noun (ball, car, rocket, server, packet, database, apple, planet, engine, sun, magnet, clock, coin, lock) — never abstract.
+- The teaching is in "say"/"beats" — explain WHY, show the idea happening, don't just name things.
+- DIRECTIONS ARE PHYSICAL: y grows DOWNWARD. Gravity/falling → "drop"; thrown/launched/at-an-angle → "throw"; pushed → "push" with the right dir. Don't send things the wrong way.
+- KEEP THE BOARD CLEAN: a label/actor stays until you remove it, so DON'T let beats pile drawings on top of each other. Place new elements in EMPTY space, and use {"act":"clear"} (or clear specific ids, or "fade") to retire finished elements before starting a new sub-idea. Every position [x,y] must be clear of what's already there.
+- "intro" is spoken ONCE; don't repeat it in a beat.
+- Prefer "story" for anything you could act out; use "diagram" for pure structure.
+${SPOKEN_STYLE_RULES}
+Output ONLY the JSON object — no markdown, no commentary.`;
+
+/** True when the vision self-critique loop should run (costs one VLM call +
+ *  possibly a repair). Off by default — opt in per request or with WB_VISION=1. */
+function wbVisionOn(opts: GenerateOptions): boolean {
+  if ((opts as any).vision != null) return !!(opts as any).vision;
+  return process.env.WB_VISION === '1' || process.env.LLM_VISION_QA === '1';
+}
+
+const wbDsl = (blueprint: any, topic: string, scene: AnimationDSL['scenes'][number]) =>
+  repace(normalizeDSL({ title: blueprint?.title || topic, width: 1920, height: 1080, fps: 30, theme: 'midnight', backgroundColor: '#0b0b10', captions: true, scenes: [scene] }));
+
+/** Ask the model to fix ONLY the visual defects a vision reviewer saw. */
+async function repairWhiteboardBlueprint(blueprint: any, issues: string[], opts: GenerateOptions): Promise<any> {
+  const user = `Here is your whiteboard blueprint:\n${JSON.stringify(blueprint)}\n\nA reviewer looked at the RENDERED frames and saw these visual problems:\n${issues.map((i) => `- ${i}`).join('\n')}\n\nReturn the CORRECTED blueprint JSON (same schema, same mode). Fix ONLY these: move overlapping or crammed elements into empty space; bring anything off-frame within x,y 0.08..0.92; if drawings pile up across beats add {"act":"clear"} (story) or use fewer nodes; replace any icon that rendered as an empty box with a more common concrete noun; make motion directions physically correct. Keep the teaching identical. Output ONLY the JSON.`;
+  return JSON.parse(extractJSON(await chatJSON(WHITEBOARD_SYSTEM, user, opts)));
+}
+
+export async function generateWhiteboard(topic: string, opts: GenerateOptions = {}): Promise<AnimationDSL> {
+  const { compileWhiteboard } = await import('./whiteboard/compose');
+  const user = `TOPIC: ${topic}\n\nDesign the whiteboard blueprint now.`;
+  let lastErr: unknown;
+  for (let tries = 0; tries < 3; tries++) {
+    try {
+      const content = await chatJSON(WHITEBOARD_SYSTEM, user, opts);
+      const blueprint = JSON.parse(extractJSON(content));
+      const scene = compileWhiteboard(blueprint);
+      if (!scene.steps.length) throw new Error('empty blueprint');
+      let dsl = wbDsl(blueprint, topic, scene);
+
+      // Self-critique loop: the engine LOOKS at its own render and fixes what a
+      // vision model flags (overlap, off-frame, clutter, placeholder icons, wrong
+      // direction). One repair pass, accepted only if it doesn't make things worse.
+      if (wbVisionOn(opts)) {
+        try {
+          const { whiteboardVisionQA } = await import('./whiteboard/vision');
+          const issues = await whiteboardVisionQA(dsl);
+          if (issues.length) {
+            console.log('[whiteboard-vision]', issues.join(' | '));
+            const fixed = await repairWhiteboardBlueprint(blueprint, issues, opts);
+            const scene2 = compileWhiteboard(fixed);
+            if (scene2.steps.length) {
+              const dsl2 = wbDsl(fixed, topic, scene2);
+              const after = await whiteboardVisionQA(dsl2);
+              if (after.length <= issues.length) { dsl = dsl2; console.log('[whiteboard-vision:repair]', after.length ? after.join(' | ') : 'clean'); }
+              else console.log('[whiteboard-vision:repair] rejected — worse');
+            }
+          }
+        } catch (e) {
+          console.log('[whiteboard-vision] skipped:', e instanceof Error ? e.message.slice(0, 120) : e);
+        }
+      }
+      return dsl;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
 }
 

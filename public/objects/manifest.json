@@ -1,0 +1,1237 @@
+{
+  "generated": "@tabler/icons v3.44 (MIT) + handmade",
+  "mode": "core",
+  "count": 220,
+  "aliases": {
+    "you": "user",
+    "me": "user",
+    "person": "user",
+    "learner": "user",
+    "developer": "user",
+    "human": "user",
+    "account": "user",
+    "profile": "user",
+    "people": "users",
+    "team": "users-group",
+    "idea": "bulb",
+    "lightbulb": "bulb",
+    "insight": "bulb",
+    "ai": "robot",
+    "ml": "brain",
+    "machine-learning": "brain",
+    "neural": "brain",
+    "model": "brain",
+    "laptop": "device-laptop",
+    "computer": "device-desktop",
+    "pc": "device-desktop",
+    "phone": "device-mobile",
+    "mobile": "device-mobile",
+    "app": "device-mobile",
+    "internet": "world",
+    "web": "world-www",
+    "website": "browser",
+    "site": "browser",
+    "db": "database",
+    "datastore": "database",
+    "storage": "database",
+    "sql": "database",
+    "backend": "server",
+    "service": "server",
+    "host": "server",
+    "vm": "server",
+    "money": "coin",
+    "cash": "cash",
+    "dollar": "currency-dollar",
+    "price": "currency-dollar",
+    "cost": "coin",
+    "payment": "credit-card",
+    "pay": "credit-card",
+    "time": "clock",
+    "timer": "hourglass",
+    "wait": "hourglass",
+    "schedule": "calendar",
+    "graph": "chart-line",
+    "chart": "chart-bar",
+    "analytics": "chart-dots",
+    "metrics": "chart-bar",
+    "growth": "trending-up",
+    "increase": "trending-up",
+    "decrease": "trending-down",
+    "secure": "shield-check",
+    "security": "shield",
+    "auth": "lock",
+    "password": "key",
+    "token": "key",
+    "encrypt": "lock",
+    "firewall": "shield",
+    "email": "mail",
+    "chat": "message-circle",
+    "notification": "bell",
+    "alert": "alert-triangle",
+    "warning": "alert-triangle",
+    "error": "circle-x",
+    "success": "circle-check",
+    "ok": "check",
+    "correct": "circle-check",
+    "wrong": "circle-x",
+    "done": "circle-check",
+    "goal": "target",
+    "aim": "target",
+    "destination": "map-pin",
+    "location": "map-pin",
+    "fast": "rocket",
+    "speed": "rocket",
+    "launch": "rocket",
+    "deploy": "rocket",
+    "power": "bolt",
+    "energy": "bolt",
+    "hot": "flame",
+    "water": "droplet",
+    "data": "database",
+    "question": "question-mark",
+    "unknown": "question-mark",
+    "info": "info-circle",
+    "search": "search",
+    "find": "search",
+    "lookup": "search",
+    "explore": "compass",
+    "settings": "settings",
+    "config": "settings",
+    "build": "tools",
+    "fix": "tool",
+    "document": "file-text",
+    "doc": "file-text",
+    "page": "file",
+    "report": "file-text",
+    "code": "code",
+    "function": "function",
+    "variable": "variable",
+    "array": "brackets",
+    "object": "braces",
+    "loop": "refresh",
+    "repeat": "refresh",
+    "sync": "refresh",
+    "request": "arrow-right",
+    "response": "arrow-left",
+    "exchange": "arrows-exchange",
+    "student": "school",
+    "teacher": "school",
+    "course": "certificate",
+    "lesson": "book",
+    "package": "package",
+    "module": "package",
+    "library": "books",
+    "dependency": "package",
+    "cloud": "cloud",
+    "upload": "arrow-up",
+    "download": "arrow-down",
+    "connect": "link",
+    "star": "star",
+    "favorite": "heart",
+    "like": "thumb-up",
+    "win": "trophy",
+    "reward": "gift"
+  },
+  "objects": [
+    {
+      "name": "book",
+      "file": "book.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "chart",
+      "file": "chart.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "chat",
+      "file": "chat.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "checkmark",
+      "file": "checkmark.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "clock",
+      "file": "clock.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "cloud",
+      "file": "cloud.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "database",
+      "file": "database.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "folder",
+      "file": "folder.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "gradcap",
+      "file": "gradcap.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "key",
+      "file": "key.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "laptop",
+      "file": "laptop.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "lightbulb",
+      "file": "lightbulb.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "magnifier",
+      "file": "magnifier.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "rocket",
+      "file": "rocket.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "star",
+      "file": "star.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "student",
+      "file": "student.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "target",
+      "file": "target.svg",
+      "source": "handmade"
+    },
+    {
+      "name": "user",
+      "file": "tabler/user.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "users",
+      "file": "tabler/users.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "users-group",
+      "file": "tabler/users-group.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "user-plus",
+      "file": "tabler/user-plus.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "user-check",
+      "file": "tabler/user-check.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "mood-smile",
+      "file": "tabler/mood-smile.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "friends",
+      "file": "tabler/friends.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "code",
+      "file": "tabler/code.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "braces",
+      "file": "tabler/braces.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "brackets",
+      "file": "tabler/brackets.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "terminal",
+      "file": "tabler/terminal.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "terminal-2",
+      "file": "tabler/terminal-2.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "bug",
+      "file": "tabler/bug.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "git-branch",
+      "file": "tabler/git-branch.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "git-commit",
+      "file": "tabler/git-commit.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "git-merge",
+      "file": "tabler/git-merge.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "git-pull-request",
+      "file": "tabler/git-pull-request.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "binary",
+      "file": "tabler/binary.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "variable",
+      "file": "tabler/variable.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "function",
+      "file": "tabler/function.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "hash",
+      "file": "tabler/hash.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "api",
+      "file": "tabler/api.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "webhook",
+      "file": "tabler/webhook.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "stack",
+      "file": "tabler/stack.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "stack-2",
+      "file": "tabler/stack-2.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "command",
+      "file": "tabler/command.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "server",
+      "file": "tabler/server.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "server-2",
+      "file": "tabler/server-2.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "database",
+      "file": "tabler/database.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "cloud",
+      "file": "tabler/cloud.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "world",
+      "file": "tabler/world.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "world-www",
+      "file": "tabler/world-www.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "network",
+      "file": "tabler/network.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "wifi",
+      "file": "tabler/wifi.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "router",
+      "file": "tabler/router.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "plug",
+      "file": "tabler/plug.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "link",
+      "file": "tabler/link.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "browser",
+      "file": "tabler/browser.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "devices",
+      "file": "tabler/devices.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "device-laptop",
+      "file": "tabler/device-laptop.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "device-desktop",
+      "file": "tabler/device-desktop.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "device-mobile",
+      "file": "tabler/device-mobile.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "cpu",
+      "file": "tabler/cpu.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "topology-star",
+      "file": "tabler/topology-star.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "bulb",
+      "file": "tabler/bulb.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "brain",
+      "file": "tabler/brain.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "book",
+      "file": "tabler/book.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "books",
+      "file": "tabler/books.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "school",
+      "file": "tabler/school.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "notes",
+      "file": "tabler/notes.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "note",
+      "file": "tabler/note.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "pencil",
+      "file": "tabler/pencil.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "writing",
+      "file": "tabler/writing.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "bookmark",
+      "file": "tabler/bookmark.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "certificate",
+      "file": "tabler/certificate.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "atom",
+      "file": "tabler/atom.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "flask",
+      "file": "tabler/flask.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "microscope",
+      "file": "tabler/microscope.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "robot",
+      "file": "tabler/robot.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "puzzle",
+      "file": "tabler/puzzle.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "file",
+      "file": "tabler/file.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "file-text",
+      "file": "tabler/file-text.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "files",
+      "file": "tabler/files.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "folder",
+      "file": "tabler/folder.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "folder-open",
+      "file": "tabler/folder-open.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "clipboard",
+      "file": "tabler/clipboard.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "copy",
+      "file": "tabler/copy.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "table",
+      "file": "tabler/table.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "list",
+      "file": "tabler/list.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "list-check",
+      "file": "tabler/list-check.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "layout-grid",
+      "file": "tabler/layout-grid.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "columns",
+      "file": "tabler/columns.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "chart-bar",
+      "file": "tabler/chart-bar.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "chart-line",
+      "file": "tabler/chart-line.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "chart-pie",
+      "file": "tabler/chart-pie.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "chart-dots",
+      "file": "tabler/chart-dots.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "trending-up",
+      "file": "tabler/trending-up.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "trending-down",
+      "file": "tabler/trending-down.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "coin",
+      "file": "tabler/coin.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "currency-dollar",
+      "file": "tabler/currency-dollar.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "cash",
+      "file": "tabler/cash.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "credit-card",
+      "file": "tabler/credit-card.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "wallet",
+      "file": "tabler/wallet.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "shopping-cart",
+      "file": "tabler/shopping-cart.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "package",
+      "file": "tabler/package.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "box",
+      "file": "tabler/box.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "arrow-right",
+      "file": "tabler/arrow-right.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "arrow-left",
+      "file": "tabler/arrow-left.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "arrow-up",
+      "file": "tabler/arrow-up.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "arrow-down",
+      "file": "tabler/arrow-down.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "arrows-exchange",
+      "file": "tabler/arrows-exchange.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "refresh",
+      "file": "tabler/refresh.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "reload",
+      "file": "tabler/reload.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "rotate",
+      "file": "tabler/rotate.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "check",
+      "file": "tabler/check.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "circle-check",
+      "file": "tabler/circle-check.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "x",
+      "file": "tabler/x.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "circle-x",
+      "file": "tabler/circle-x.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "alert-triangle",
+      "file": "tabler/alert-triangle.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "alert-circle",
+      "file": "tabler/alert-circle.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "info-circle",
+      "file": "tabler/info-circle.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "help-circle",
+      "file": "tabler/help-circle.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "question-mark",
+      "file": "tabler/question-mark.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "lock",
+      "file": "tabler/lock.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "lock-open",
+      "file": "tabler/lock-open.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "key",
+      "file": "tabler/key.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "shield",
+      "file": "tabler/shield.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "shield-check",
+      "file": "tabler/shield-check.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "shield-lock",
+      "file": "tabler/shield-lock.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "fingerprint",
+      "file": "tabler/fingerprint.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "mail",
+      "file": "tabler/mail.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "message",
+      "file": "tabler/message.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "message-circle",
+      "file": "tabler/message-circle.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "messages",
+      "file": "tabler/messages.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "bell",
+      "file": "tabler/bell.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "phone",
+      "file": "tabler/phone.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "send",
+      "file": "tabler/send.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "clock",
+      "file": "tabler/clock.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "hourglass",
+      "file": "tabler/hourglass.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "calendar",
+      "file": "tabler/calendar.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "target",
+      "file": "tabler/target.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "focus-2",
+      "file": "tabler/focus-2.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "flag",
+      "file": "tabler/flag.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "map-pin",
+      "file": "tabler/map-pin.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "map",
+      "file": "tabler/map.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "settings",
+      "file": "tabler/settings.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "adjustments",
+      "file": "tabler/adjustments.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "tool",
+      "file": "tabler/tool.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "tools",
+      "file": "tabler/tools.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "search",
+      "file": "tabler/search.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "zoom-in",
+      "file": "tabler/zoom-in.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "filter",
+      "file": "tabler/filter.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "eye",
+      "file": "tabler/eye.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "eye-off",
+      "file": "tabler/eye-off.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "star",
+      "file": "tabler/star.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "heart",
+      "file": "tabler/heart.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "thumb-up",
+      "file": "tabler/thumb-up.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "trash",
+      "file": "tabler/trash.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "edit",
+      "file": "tabler/edit.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "plus",
+      "file": "tabler/plus.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "minus",
+      "file": "tabler/minus.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "rocket",
+      "file": "tabler/rocket.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "bolt",
+      "file": "tabler/bolt.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "flame",
+      "file": "tabler/flame.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "droplet",
+      "file": "tabler/droplet.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "bulb-off",
+      "file": "tabler/bulb-off.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "building",
+      "file": "tabler/building.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "home",
+      "file": "tabler/home.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "tag",
+      "file": "tabler/tag.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "tags",
+      "file": "tabler/tags.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "id",
+      "file": "tabler/id.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "trophy",
+      "file": "tabler/trophy.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "gift",
+      "file": "tabler/gift.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "lifebuoy",
+      "file": "tabler/lifebuoy.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "compass",
+      "file": "tabler/compass.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "route",
+      "file": "tabler/route.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "sitemap",
+      "file": "tabler/sitemap.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "sun",
+      "file": "tabler/sun.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "moon",
+      "file": "tabler/moon.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "star",
+      "file": "tabler/star.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "planet",
+      "file": "tabler/planet.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "atom",
+      "file": "tabler/atom.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "atom-2",
+      "file": "tabler/atom-2.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "engine",
+      "file": "tabler/engine.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "magnet",
+      "file": "tabler/magnet.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "wind",
+      "file": "tabler/wind.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "temperature",
+      "file": "tabler/temperature.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "thermometer",
+      "file": "tabler/thermometer.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "snowflake",
+      "file": "tabler/snowflake.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "mountain",
+      "file": "tabler/mountain.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "plant",
+      "file": "tabler/plant.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "plant-2",
+      "file": "tabler/plant-2.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "leaf",
+      "file": "tabler/leaf.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "tree",
+      "file": "tabler/tree.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "dna",
+      "file": "tabler/dna.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "dna-2",
+      "file": "tabler/dna-2.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "flask-2",
+      "file": "tabler/flask-2.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "test-pipe",
+      "file": "tabler/test-pipe.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "gauge",
+      "file": "tabler/gauge.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "scale",
+      "file": "tabler/scale.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "ruler",
+      "file": "tabler/ruler.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "ruler-2",
+      "file": "tabler/ruler-2.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "calculator",
+      "file": "tabler/calculator.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "math",
+      "file": "tabler/math.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "math-symbols",
+      "file": "tabler/math-symbols.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "wave-sine",
+      "file": "tabler/wave-sine.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "wave-square",
+      "file": "tabler/wave-square.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "battery",
+      "file": "tabler/battery.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "bulb",
+      "file": "tabler/bulb.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "apple",
+      "file": "tabler/apple.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "ball-football",
+      "file": "tabler/ball-football.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "car",
+      "file": "tabler/car.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "plane",
+      "file": "tabler/plane.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "ship",
+      "file": "tabler/ship.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "walk",
+      "file": "tabler/walk.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "run",
+      "file": "tabler/run.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "clock-hour-4",
+      "file": "tabler/clock-hour-4.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "calendar-event",
+      "file": "tabler/calendar-event.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "building-bank",
+      "file": "tabler/building-bank.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "scale-outline",
+      "file": "tabler/scale-outline.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "balloon",
+      "file": "tabler/balloon.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "bucket",
+      "file": "tabler/bucket.svg",
+      "source": "tabler"
+    },
+    {
+      "name": "droplet-half",
+      "file": "tabler/droplet-half.svg",
+      "source": "tabler"
+    }
+  ]
+}

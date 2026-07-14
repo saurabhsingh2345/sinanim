@@ -26,6 +26,7 @@ import {
   TitleScene,
   VizScene,
   VizStep,
+  WhiteboardScene,
   PRIMARY_CARD_TYPES,
 } from './types';
 import { tokenizeCode, Tok } from './highlight';
@@ -68,6 +69,9 @@ import {
 } from './render/ide';
 import { drawApiCard } from './render/api';
 import { drawPrCard } from './render/pr';
+import { drawWhiteboardCard, whiteboardFocus } from './render/whiteboard';
+import { ParsedSvg, parseSvg } from './render/svg';
+import { loadObjectManifest, resolveObjectFile } from './render/objectResolver';
 
 export { browserFocus };
 export { cliTypedCount };
@@ -95,6 +99,8 @@ export interface Prepared {
   /** browser sceneIndex -> a decoded REAL page screenshot (loaded from scene.shot,
    *  works in both Node via @napi-rs/canvas and the browser via Image). */
   pageShots?: Map<number, CanvasImageSource>;
+  /** whiteboard sceneIndex -> parsed SVG objects keyed by their `src`. */
+  svgObjects?: Map<number, Map<string, ParsedSvg>>;
 }
 
 /** Load a captured page screenshot in whichever runtime we're in. Node uses
@@ -113,6 +119,24 @@ async function loadShotImage(src: string): Promise<CanvasImageSource | null> {
     // module into the browser build (it pulls in `fs`, which breaks the client).
     const mod: any = await import(/* webpackIgnore: true */ '@napi-rs/canvas');
     return (await mod.loadImage(src)) as CanvasImageSource;
+  } catch {
+    return null;
+  }
+}
+
+/** Read an SVG object's source text. Node reads public/objects from disk; the
+ *  browser fetches it. `src` may be a bare filename, 'objects/x.svg', or '/…'. */
+async function loadSvgText(src: string): Promise<string | null> {
+  try {
+    const norm = src.replace(/^\//, '');
+    const rel = norm.startsWith('objects/') ? norm : `objects/${norm}`;
+    if (typeof window !== 'undefined') {
+      const r = await fetch(`/${rel}`);
+      return r.ok ? await r.text() : null;
+    }
+    const fs: any = await import(/* webpackIgnore: true */ 'node:fs');
+    const path: any = await import(/* webpackIgnore: true */ 'node:path');
+    return fs.readFileSync(path.join(process.cwd(), 'public', rel), 'utf8');
   } catch {
     return null;
   }
@@ -141,6 +165,7 @@ export async function prepare(dsl: AnimationDSL): Promise<Prepared> {
   const ideTokens = new Map<number, Map<string, Tok[][]>>();
   const videos = new Map<number, HTMLVideoElement>();
   const pageShots = new Map<number, CanvasImageSource>();
+  const svgObjects = new Map<number, Map<string, ParsedSvg>>();
   await Promise.all(
     dsl.scenes.map(async (s, i) => {
       // Narration-paced content window: code should land WITH the voice, not
@@ -226,10 +251,31 @@ export async function prepare(dsl: AnimationDSL): Promise<Prepared> {
         // Real captured screenshot of the live URL — composited over mock blocks.
         const img = await loadShotImage(s.shot);
         if (img) pageShots.set(i, img);
+      } else if (s.type === 'whiteboard') {
+        // Parse every distinct imported SVG object once (deduped by src). `src`
+        // may be a concept word ("server", "money") — resolve it to a real file
+        // via the manifest (handmade + Tabler icons), all local, no AI cost.
+        const manifest = await loadObjectManifest();
+        const m = new Map<string, ParsedSvg>();
+        const seen = new Set<string>();
+        const jobs: Promise<void>[] = [];
+        const wantIcon = (key: string) => {
+          if (!key || seen.has(key)) return;
+          seen.add(key);
+          const file = resolveObjectFile(key, manifest);
+          if (file) jobs.push(loadSvgText(file).then((txt) => { if (txt) m.set(key, parseSvg(txt)); }));
+        };
+        for (const st of s.steps) for (const el of st.add) {
+          if (el.kind === 'object' && el.src) wantIcon(el.src);
+        }
+        // story-mode actors carry their own icons
+        for (const a of s.actors ?? []) if (a.icon) wantIcon(a.icon);
+        await Promise.all(jobs);
+        svgObjects.set(i, m);
       }
     }),
   );
-  return { dsl, morphs, schedule, typedText, ideTokens, videos, pageShots };
+  return { dsl, morphs, schedule, typedText, ideTokens, videos, pageShots, svgObjects };
 }
 
 /**
@@ -407,6 +453,15 @@ export function renderFrame(ctx: CanvasRenderingContext2D, prep: Prepared, time:
   } else if (card && card.type === 'layout') {
     const f = layoutFocus(card as LayoutScene, W, H);
     if (f) targets.push(f);
+  } else if (card && card.type === 'whiteboard') {
+    // gentle poster breath + push, then glide toward whatever is being drawn now
+    breath = breathFor('whiteboard');
+    targets.push({
+      x: W / 2, y: H / 2, zoom: 1.03,
+      strength: envelopeBack(time, card.startTime, card.startTime + card.duration, 0.9, 0.7, 1.3),
+    });
+    const f = whiteboardFocus(card as WhiteboardScene, time, W, H);
+    if (f) targets.push(f);
   } else if (card) {
     // full-frame card scene (title/chapter/bullets/quote/…): gentle push-in with a
     // touch of overshoot, over a cinema-slider breathing base. Poster cards get a
@@ -510,6 +565,7 @@ function breathFor(type: string): number {
     case 'diagram':
     case 'text':
     case 'mascot':
+    case 'whiteboard':
       return 0.009;
     case 'quiz':
     case 'challenge':
@@ -672,6 +728,7 @@ function drawWorld(
       case 'layout': drawLayoutCard(ctx, prep, card as LayoutScene, time, W, H); return;
       case 'recall': drawRecallCard(ctx, card as RecallScene, time, W, H); return;
       case 'cheatsheet': drawCheatsheetCard(ctx, card as CheatsheetScene, time, W, H); return;
+      case 'whiteboard': drawWhiteboardCard(ctx, prep, card as WhiteboardScene, time, W, H); return;
     }
   }
 

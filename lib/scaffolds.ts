@@ -1200,6 +1200,176 @@ const REST_CRUD = () =>
     'midnight',
   );
 
+/** Whiteboard explainer — hand-written text + drawn-on SVG objects, then recap */
+const WHITEBOARD_DEMO = () =>
+  base(
+    'How learning sticks',
+    [
+      {
+        type: 'title',
+        text: 'How learning sticks',
+        subtitle: 'a whiteboard explainer',
+        startTime: 0,
+        duration: 3,
+        narration: 'Some ideas stick and some slide right off. Let me sketch out why.',
+      },
+      {
+        type: 'whiteboard',
+        board: 'white',
+        pen: true,
+        steps: [
+          { narration: 'How does learning stick?', add: [
+            { kind: 'text', text: 'How learning sticks', at: [0.5, 0.13], size: 78 },
+            { kind: 'underline', from: [0.28, 0.2], to: [0.72, 0.2] },
+          ] },
+          { narration: 'Start with a curious learner.', add: [
+            { kind: 'object', src: 'student.svg', at: [0.22, 0.58], scale: 1.35 },
+            { kind: 'text', text: 'you', at: [0.22, 0.9], size: 46 },
+          ] },
+          { narration: 'An idea appears —', add: [
+            { kind: 'object', src: 'lightbulb.svg', at: [0.52, 0.42], scale: 1.0 },
+            { kind: 'arrow', from: [0.32, 0.55], to: [0.46, 0.46] },
+          ] },
+          { narration: 'you practice it,', add: [
+            { kind: 'object', src: 'book.svg', at: [0.78, 0.58], scale: 1.2 },
+            { kind: 'text', text: 'practice', at: [0.78, 0.9], size: 46 },
+            { kind: 'arrow', from: [0.6, 0.46], to: [0.72, 0.54] },
+          ] },
+          { narration: 'and it clicks into place.', add: [
+            { kind: 'circle', from: [0.43, 0.28], to: [0.61, 0.56] },
+          ] },
+          { narration: 'Now it is yours.', add: [
+            { kind: 'object', src: 'star.svg', at: [0.52, 0.42], scale: 0.5 },
+          ] },
+        ],
+        startTime: 3,
+        duration: 16,
+        narration: 'Let me show you how learning actually sticks.',
+      },
+      {
+        type: 'bullets',
+        title: 'Make it stick',
+        items: ['Meet a real idea', 'Practice it by hand', 'Connect it to what you know'],
+        startTime: 19,
+        duration: 7,
+        narration: 'Meet a real idea. Practice it by hand. Connect it to what you already know. That is the whole loop.',
+      },
+    ],
+    'nord',
+  );
+
+/** Whiteboard system-flow — concept-word icons + curved arrows + a highlight */
+const WHITEBOARD_FLOW = () =>
+  base(
+    'How a web request flows',
+    [
+      {
+        type: 'title',
+        text: 'A request, end to end',
+        subtitle: 'browser → server → database',
+        startTime: 0,
+        duration: 3,
+        narration: 'Let me trace what happens when you open an app — start to finish.',
+      },
+      {
+        type: 'whiteboard',
+        board: 'white',
+        pen: true,
+        steps: [
+          { narration: 'You open the app in your browser.', add: [
+            { kind: 'object', src: 'browser', at: [0.15, 0.42] },
+            { kind: 'text', text: 'browser', at: [0.15, 0.64], size: 38 },
+          ] },
+          { narration: 'It sends a request to the server.', add: [
+            { kind: 'object', src: 'server', at: [0.5, 0.42] },
+            { kind: 'text', text: 'server', at: [0.5, 0.64], size: 38 },
+            { kind: 'curve', from: [0.24, 0.42], to: [0.42, 0.42] },
+          ] },
+          { narration: 'The server reads from the database.', add: [
+            { kind: 'object', src: 'database', at: [0.85, 0.42] },
+            { kind: 'text', text: 'database', at: [0.85, 0.64], size: 38 },
+            { kind: 'curve', from: [0.58, 0.42], to: [0.78, 0.42] },
+          ] },
+          { narration: 'That lookup is the slow part — a good place to cache.', add: [
+            { kind: 'highlight', from: [0.75, 0.42], to: [0.96, 0.42] },
+            { kind: 'text', text: 'cache this!', at: [0.85, 0.16], size: 40, color: '#d1495b' },
+          ] },
+          { narration: 'The answer flows back as JSON and the page renders.', add: [
+            { kind: 'curve', from: [0.82, 0.54], to: [0.2, 0.56], color: '#3aa76d' },
+            { kind: 'check', at: [0.15, 0.5] },
+          ] },
+        ],
+        startTime: 3,
+        duration: 18,
+        narration: 'Here is the whole round trip on one board.',
+      },
+      {
+        type: 'bullets',
+        title: 'The round trip',
+        items: ['Browser requests', 'Server owns the logic', 'Database is the slow hop — cache it'],
+        startTime: 21,
+        duration: 7,
+        narration: 'Browser requests, server owns the logic, database is the slow hop. When it drags, cache that lookup.',
+      },
+    ],
+    'nord',
+  );
+
+/** Whiteboard comparison — two columns decided with checks, a cross, a highlight */
+const WHITEBOARD_COMPARE = () =>
+  base(
+    'const vs let',
+    [
+      {
+        type: 'title',
+        text: 'const vs let',
+        subtitle: 'which one, and when',
+        startTime: 0,
+        duration: 3,
+        narration: 'Two ways to declare a variable. Let me show you which to reach for.',
+      },
+      {
+        type: 'whiteboard',
+        board: 'white',
+        pen: true,
+        steps: [
+          { narration: 'On the left, const. On the right, let.', add: [
+            { kind: 'text', text: 'const', at: [0.28, 0.2], size: 66 },
+            { kind: 'text', text: 'let', at: [0.72, 0.2], size: 66 },
+            { kind: 'underline', from: [0.19, 0.28], to: [0.37, 0.28] },
+            { kind: 'underline', from: [0.67, 0.28], to: [0.77, 0.28] },
+          ] },
+          { narration: 'const cannot be reassigned — it locks the binding.', add: [
+            { kind: 'object', src: 'lock', at: [0.28, 0.48] },
+            { kind: 'text', text: 'no reassign', at: [0.28, 0.72], size: 34 },
+            { kind: 'check', at: [0.28, 0.86] },
+          ] },
+          { narration: 'let can change under you — easy to misuse.', add: [
+            { kind: 'object', src: 'refresh', at: [0.72, 0.48] },
+            { kind: 'text', text: 'mutable', at: [0.72, 0.72], size: 34 },
+            { kind: 'cross', at: [0.72, 0.86] },
+          ] },
+          { narration: 'So reach for const first, and let only when you must.', add: [
+            { kind: 'highlight', from: [0.19, 0.2], to: [0.37, 0.2] },
+            { kind: 'text', text: 'default', at: [0.28, 0.06], size: 36, color: '#3aa76d' },
+          ] },
+        ],
+        startTime: 3,
+        duration: 16,
+        narration: 'A side-by-side that settles the question.',
+      },
+      {
+        type: 'bullets',
+        title: 'Rule of thumb',
+        items: ['const by default', 'let only when it must change', 'never var'],
+        startTime: 19,
+        duration: 6,
+        narration: 'const by default. let only when a value must change. And never var.',
+      },
+    ],
+    'nord',
+  );
+
 export const TEMPLATES: TemplateDef[] = [
   { id: 'python-loops', label: 'Python loops', blurb: 'Title → IDE for/while → viz → quiz → challenge → recap', ready: true, build: PYTHON_LOOPS },
   { id: 'web-python-docs', label: 'Find Python docs', blurb: 'Chrome search → SERP → docs → downloads', ready: true, build: WEB_PYTHON_DOCS },
@@ -1216,4 +1386,7 @@ export const TEMPLATES: TemplateDef[] = [
   { id: 'diagram', label: 'Request flow', blurb: 'Sketch diagram of browser → server → DB', ready: true, build: DIAGRAM_DEMO },
   { id: 'challenge', label: 'Coding challenge', blurb: 'Prompt → hands-on function with tests', ready: true, build: CHALLENGE_DEMO },
   { id: 'review', label: 'Recall + cheat sheet', blurb: 'Spaced-review opener → end-of-lesson cheat sheet', ready: true, build: REVIEW_DEMO },
+  { id: 'whiteboard', label: 'Whiteboard explainer', blurb: 'Hand-drawn text + objects sketched on, then a recap', ready: true, build: WHITEBOARD_DEMO },
+  { id: 'whiteboard-flow', label: 'Whiteboard: system flow', blurb: 'Concept icons + curved arrows trace a request end to end', ready: true, build: WHITEBOARD_FLOW },
+  { id: 'whiteboard-compare', label: 'Whiteboard: A vs B', blurb: 'Two columns settled with checks, a cross and a highlight', ready: true, build: WHITEBOARD_COMPARE },
 ];

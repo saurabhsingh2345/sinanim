@@ -12,7 +12,7 @@ import { AnimationDSL } from '@/lib/types';
 
 const THUMB_W = 480;
 const THUMB_H = 270;
-const FULL_FRAME = new Set(['ide', 'cli', 'browser', 'split', 'api', 'pr', 'layout', 'viz', 'diagram', 'quiz', 'challenge']);
+const FULL_FRAME = new Set(['ide', 'cli', 'browser', 'split', 'api', 'pr', 'layout', 'viz', 'diagram', 'quiz', 'challenge', 'whiteboard']);
 
 const cache = new Map<string, string>();
 let queue: Promise<void> = Promise.resolve();

@@ -24,6 +24,8 @@ function reg(file: string, family: string) {
 const okMono = reg('JetBrainsMono.ttf', 'JetBrains Mono');
 const okSans = reg('Inter.ttf', 'Inter');
 const okDisplay = reg('SpaceGrotesk.ttf', 'Space Grotesk');
+// Handwriting marker for the whiteboard template's written text.
+const okHand = reg('Caveat.ttf', 'Caveat');
 
 // Fallback for machines without the bundled files (keeps old scripts working).
 if (!okMono) for (const p of ['/System/Library/Fonts/Menlo.ttc'])
@@ -33,4 +35,4 @@ if (!okSans) for (const p of ['/System/Library/Fonts/Helvetica.ttc', '/Library/F
 if (!okDisplay) for (const p of ['/System/Library/Fonts/Helvetica.ttc', '/Library/Fonts/Arial.ttf'])
   if (existsSync(p)) { try { GlobalFonts.registerFromPath(p, 'Space Grotesk'); } catch {} }
 
-export const FONTS_READY = { mono: okMono, sans: okSans, display: okDisplay };
+export const FONTS_READY = { mono: okMono, sans: okSans, display: okDisplay, hand: okHand };

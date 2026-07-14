@@ -75,7 +75,7 @@ export function composeStepNarration(
  * it saying everything four times" bug). Deriving on read is idempotent.
  */
 export function spokenNarration(scene: Scene): string {
-  if (scene.type === 'ide' && Array.isArray(scene.steps) && hasStepNarration(scene.steps)) {
+  if ((scene.type === 'ide' || scene.type === 'whiteboard') && Array.isArray(scene.steps) && hasStepNarration(scene.steps)) {
     return composeStepNarration(scene.narration, scene.steps);
   }
   return scene.narration || '';
