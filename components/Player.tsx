@@ -695,16 +695,37 @@ export function Player({
   // ── Export ──
   const doExport = useCallback(async () => {
     const canvas = canvasRef.current;
-    const prep = prepRef.current;
     const engine = engineRef.current;
-    if (!canvas || !prep || !engine || exporting) return;
+    if (!canvas || !prepRef.current || !engine || exporting) return;
     pause();
     setExporting(true);
     setProgress(0);
     try {
+      // Guarantee narration is baked in. The background TTS pass is debounced and
+      // can still be running (or never have started) when export is clicked —
+      // exporting with the empty buffer map produces a video with sfx but no
+      // voice. If narration is needed and not ready, synthesize it now and
+      // rebuild the prep so scene timings match the voiced audio.
+      let prep = prepRef.current;
+      let buffers = narrBuffersRef.current;
+      const needVoice = voiceOn && hasNarration && narrEngineRef.current;
+      if (needVoice && (buffers.size === 0 || tts.phase !== 'ready')) {
+        const res = await buildNarration({ ...dsl, voice }, narrEngineRef.current!, engine.context, (p) => setTts(p));
+        buffers = res.buffers;
+        narrBuffersRef.current = res.buffers;
+        narrWordsRef.current = res.words;
+        conductorRef.current?.setNarration(res.buffers);
+        prep = await prepare(res.dsl);
+        prep.dsl.captions = captionsOn;
+        prep.words = res.words;
+        prepRef.current = prep;
+        setAdsl(res.dsl);
+        setTts({ phase: 'ready' });
+      }
+
       const wasMuted = engine.muted;
       engine.muted = false; // always bake audio into the export
-      const { blob, ext } = await exportVideo(canvas, prep, engine, setProgress, narrBuffersRef.current);
+      const { blob, ext } = await exportVideo(canvas, prep, engine, setProgress, buffers);
       engine.muted = wasMuted;
       const safe = adsl.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
       downloadBlob(blob, `${safe || 'lesson'}.${ext}`);
@@ -716,7 +737,7 @@ export function Player({
       setExporting(false);
       setProgress(0);
     }
-  }, [adsl.title, exporting, pause, seek]);
+  }, [adsl.title, dsl, voice, voiceOn, hasNarration, captionsOn, tts.phase, exporting, pause, seek]);
 
   // 9:16 short: derive a vertical teaser (hook + payoff), re-synthesize its
   // narration (subset of scenes → fresh, correctly-keyed buffers), and export it
