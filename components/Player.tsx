@@ -725,11 +725,18 @@ export function Player({
 
       const wasMuted = engine.muted;
       engine.muted = false; // always bake audio into the export
-      const { blob, ext } = await exportVideo(canvas, prep, engine, setProgress, buffers);
+      const { blob, ext, path } = await exportVideo(canvas, prep, engine, setProgress, buffers);
       engine.muted = wasMuted;
       const safe = adsl.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
       downloadBlob(blob, `${safe || 'lesson'}.${ext}`);
       seek(0);
+      if (path === 'realtime') {
+        alert(
+          'Exported, but your browser used the realtime recorder, which can drop ' +
+            'frames and look laggy. For a crisp, frame-exact 1080p export, use a ' +
+            'recent Chrome or Edge (they support the fast WebCodecs encoder).',
+        );
+      }
     } catch (e) {
       console.error(e);
       alert('Export failed: ' + (e instanceof Error ? e.message : 'unknown'));

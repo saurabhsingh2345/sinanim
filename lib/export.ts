@@ -21,6 +21,21 @@ export function pickMime(): string {
 export interface RecordResult {
   blob: Blob;
   ext: string;
+  /** Which encoder produced the file — 'webcodecs' is the crisp, frame-exact
+   *  path; 'realtime' is the MediaRecorder fallback that can drop frames. */
+  path?: 'webcodecs' | 'realtime';
+}
+
+/**
+ * Target video bitrate for a given resolution/fps. Screen content (text, code,
+ * sharp edges) needs far more bits than camera footage to stay crisp, so we aim
+ * high — ~0.28 bits/pixel/frame — and cap at 40 Mbps. For 1080p30 this is
+ * ~17 Mbps (vs. the old flat 12 Mbps), which removes the soft/blocky look on
+ * text without bloating the file.
+ */
+export function targetBitrate(width: number, height: number, fps: number): number {
+  const bpp = 0.28;
+  return Math.min(Math.round(width * height * fps * bpp), 40_000_000);
 }
 
 /**
@@ -50,7 +65,7 @@ export async function recordVideo(
   const ext = mimeType.startsWith('video/mp4') ? 'mp4' : 'webm';
   const rec = new MediaRecorder(stream, {
     mimeType,
-    videoBitsPerSecond: 12_000_000,
+    videoBitsPerSecond: targetBitrate(canvas.width, canvas.height, fps),
     audioBitsPerSecond: 128_000,
   });
 
@@ -86,7 +101,7 @@ export async function recordVideo(
   rec.stop();
   await stopped;
   onProgress?.(1);
-  return { blob: new Blob(chunks, { type: mimeType }), ext };
+  return { blob: new Blob(chunks, { type: mimeType }), ext, path: 'realtime' };
 }
 
 // ── Fast export (WebCodecs) ─────────────────────────────────────────────────────
@@ -109,10 +124,11 @@ function supportsWebCodecs(): boolean {
 const AVC_CANDIDATES = ['avc1.640028', 'avc1.4d0028', 'avc1.42e01f'];
 
 async function pickAvcCodec(width: number, height: number, fps: number): Promise<string | null> {
+  const bitrate = targetBitrate(width, height, fps);
   for (const codec of AVC_CANDIDATES) {
     try {
       const { supported } = await VideoEncoder.isConfigSupported({
-        codec, width, height, framerate: fps, bitrate: 12_000_000,
+        codec, width, height, framerate: fps, bitrate,
       });
       if (supported) return codec;
     } catch { /* try next */ }
@@ -188,7 +204,17 @@ export async function recordVideoFast(
     output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
     error: (e) => { encodeError = e; },
   });
-  videoEncoder.configure({ codec, width: W, height: H, framerate: fps, bitrate: 12_000_000 });
+  videoEncoder.configure({
+    codec,
+    width: W,
+    height: H,
+    framerate: fps,
+    bitrate: targetBitrate(W, H, fps),
+    // VBR lets the encoder spend extra bits on busy text/code frames instead of
+    // starving them to hold a constant rate — noticeably crisper screen content.
+    bitrateMode: 'variable',
+    latencyMode: 'quality',
+  });
 
   const audioEncoder = new AudioEncoder({
     output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
@@ -244,7 +270,7 @@ export async function recordVideoFast(
   muxer.finalize();
   onProgress?.(1);
   const { buffer } = muxer.target as InstanceType<typeof ArrayBufferTarget>;
-  return { blob: new Blob([buffer], { type: 'video/mp4' }), ext: 'mp4' };
+  return { blob: new Blob([buffer], { type: 'video/mp4' }), ext: 'mp4', path: 'webcodecs' };
 }
 
 /**
@@ -262,8 +288,17 @@ export async function exportVideo(
     try {
       return await recordVideoFast(canvas, prep, engine, onProgress, narration);
     } catch (e) {
-      console.warn('Fast export unavailable, falling back to realtime capture:', e);
+      console.warn(
+        '[export] WebCodecs fast path failed — falling back to realtime capture, ' +
+          'which can drop frames and look laggy. Reason:',
+        e,
+      );
     }
+  } else {
+    console.warn(
+      '[export] WebCodecs unavailable in this browser — using realtime capture ' +
+        '(may drop frames). Use a recent Chrome/Edge for the crisp, frame-exact export.',
+    );
   }
   return recordVideo(canvas, prep, engine, onProgress, narration);
 }
