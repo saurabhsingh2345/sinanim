@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { CourseOutline, generateCourseOutline } from '@/lib/course';
+import { CourseOutline } from '@/lib/course';
+import { generateCourseOutline } from '@/lib/course-gen';
 
 type Data = { outline: CourseOutline } | { error: string };
 

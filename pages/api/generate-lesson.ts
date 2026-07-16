@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { generateLessonDSL } from '@/lib/course';
+import { generateLessonDSL } from '@/lib/course-gen';
 import { AnimationDSL } from '@/lib/types';
 
 type Data = { dsl: AnimationDSL } | { error: string };
